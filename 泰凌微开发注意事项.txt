@@ -1,0 +1,11 @@
+1. 烧录板和开发板连接线
+   烧录板           开发板
+   3V3              3V3
+   S_OUT            SWS
+   GND              GND
+2. 点击RstMCU，收到回复Slave MCU Reset，否则重新插拔；
+3. Eclipse工程设置：
+   右键项目->Properities->C/C++ General->Indexer->
+   勾选Enable project specific settings
+   勾选Store settings with project
+   勾选Use active build configuration
