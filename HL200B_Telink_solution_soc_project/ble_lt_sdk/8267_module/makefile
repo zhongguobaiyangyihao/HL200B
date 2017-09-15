@@ -14,6 +14,7 @@ RM := rm -rf
 -include vendor/826x_module/slip_protocol/subdir.mk
 -include vendor/826x_module/da213/subdir.mk
 -include vendor/826x_module/MC3416/subdir.mk
+-include vendor/826x_module/Lock/subdir.mk
 -include vendor/826x_module/GPS_GPRS_Communicate/subdir.mk
 -include proj/mcu_spec/subdir.mk
 -include proj/mcu/subdir.mk

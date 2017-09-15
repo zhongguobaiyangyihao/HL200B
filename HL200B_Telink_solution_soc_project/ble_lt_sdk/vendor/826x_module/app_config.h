@@ -18,9 +18,13 @@ extern "C" {
 /****************************************************************************/
 #define GSENSOR_ACTIVE_INTERRUPT_PIN         GPIO_PE0
 #define GSENSOR_FREEFALL_INTERRUPT_PIN       GPIO_PE1
-#define LPLUG_IN_PIN                         GPIO_PA0
-#define MPOS_IN_PIN                          GPIO_PA1
+#define CLOSE_LOCK_CHECK_PIN                 GPIO_PA0//¹ØËøLPLUG_IN_PIN
+#define OPEN_LOCK_CHECK_PIN                  GPIO_PA1//¿ªËøMPOS_IN_PIN
 #define RF_POWERON_PIN                       GPIO_PE3
+#define SC6531_RESET                         GPIO_PE2
+
+#define MOTOR_PWM0                           GPIO_PC5
+#define MOTOR_PWM1                           GPIO_PC4
 /****************************************************************************/
 /////////////////////HCI ACCESS OPTIONS///////////////////////////////////////
 #define HCI_USE_UART	1
@@ -42,8 +46,8 @@ typedef struct
 	u8  reserved0                     : 1;
 	u8  reserved1                     : 1;
 	u8  reserved2                     : 1;
-	u8  reserved3                     : 1;
-	u8  reserved4                     : 1;
+	u8  is_turnon_lock                : 1;
+	u8  is_lock_event_occur           : 1;
 	u8  is_return_domain_via_ble      : 1;
 	u8  is_module_excute              : 1;
 	u8  is_module_transmit            : 1;

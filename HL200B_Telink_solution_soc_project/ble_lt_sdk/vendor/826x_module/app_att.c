@@ -700,6 +700,24 @@ int sprocomm_lock_write_evt_handler(rf_packet_att_write_t *p)
 				printf("GET_LOCK_DOMAINS_CMD.\n");
 				break;
 			}
+		    case OPEN_THE_LOCK_CMD: //open the lock
+			{
+				printf("OPEN_THE_LOCK_CMD.\n");
+				Flag.is_turnon_lock = 1;
+#if 0
+				memcpy(g_password, decrypted_data+3, 6);
+				open_lock_ack_t* open_lock_ack = (open_lock_ack_t*)p;
+				open_lock_ack->tokenAck1 = 0x05;
+				open_lock_ack->tokenAck2 = 0x02;
+				open_lock_ack->tokenAck3 = 0x01;
+				open_lock_ack->RET = 0;//RET 为状态返回，00 表示开锁成功，01 表示开锁失败。
+				open_lock_ack->tl = 7;//TL为时间长度，其中年份占2个字节，其余月日时分秒各一个字节
+				open_lock_ack->rtc = GET_RTC_VAL();
+
+				AES_ECB_Encryption(g_private_AES_key, (u8*)open_lock_ack, encrypted_data);
+				bls_att_pushNotifyData(BleLockChar2DataHdl, encrypted_data, 16);
+#endif
+			}
 			default:
 			{
 				break;

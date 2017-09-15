@@ -101,7 +101,7 @@ static void module_turnon_schedule(void)
 		{
 			if(!is_config_sent)
 			{
-				module_config_params((u8 *)module_cmd_AT,strlen(module_cmd_AT),"OK",3,WAIT_TIME_ONE_SECOND);
+				//module_config_params((u8 *)module_cmd_AT,strlen(module_cmd_AT),"OK",3,WAIT_TIME_ONE_SECOND);
 				is_config_sent = 1;
 			}
 			else

@@ -11,6 +11,7 @@ extern my_fifo_t uart_rx_fifo;
 extern void user_init();
 extern _attribute_ram_code_ void gsensor_gpio_irq_proc(void);
 extern void TIMER0_Timeout_handler(void);
+extern _attribute_ram_code_ void Lock_gpio_irq_proc(void);
 /**********************************/
 _attribute_ram_code_ void irq_handler(void)
 {
@@ -39,6 +40,7 @@ _attribute_ram_code_ void irq_handler(void)
 #endif
 
     gsensor_gpio_irq_proc();
+    Lock_gpio_irq_proc();
     TIMER0_Timeout_handler();
 }
 /**********************************

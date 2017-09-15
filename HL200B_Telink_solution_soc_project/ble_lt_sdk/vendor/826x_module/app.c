@@ -63,6 +63,8 @@ extern void module_pwroff(void);
 extern void module_schedule_handler(void);
 extern void ble_return_domain_operation(void);
 extern void battery_power_check(void);
+extern void Lock_gpio_interrupt_init(void);
+extern void Lock_turnon_operation(void);
 /**************************************************************************/
 /////////////////////////////// HemiaoLock concerned ///////////////////////////////////////////
 u32 g_current_time;
@@ -264,6 +266,7 @@ static void user_gpio_interrupt_init(void)
 {
 	gpio_core_irq_enable_all(1);  //gpio interrupt must enable
 	gsensor_gpio_interrupt_init();
+	Lock_gpio_interrupt_init();
 }
 /*
  *timer init
@@ -309,22 +312,38 @@ static void user_timer0_timeout_handler(void)
  */
 static void user_gpio_init(void)
 {
-	//开锁管脚初始化
-    gpio_set_func(LPLUG_IN_PIN,AS_GPIO);
-    gpio_setup_up_down_resistor(LPLUG_IN_PIN, PM_PIN_UP_DOWN_FLOAT);
-    gpio_set_input_en(LPLUG_IN_PIN,1);
-    gpio_set_output_en(LPLUG_IN_PIN, 0);
-    //开锁管脚初始化
-	gpio_set_func(MPOS_IN_PIN,AS_GPIO);
-	gpio_setup_up_down_resistor(MPOS_IN_PIN, PM_PIN_UP_DOWN_FLOAT);
-	gpio_set_input_en(MPOS_IN_PIN,1);
-	gpio_set_output_en(MPOS_IN_PIN, 0);
+	//开锁检测管脚初始化
+    gpio_set_func(OPEN_LOCK_CHECK_PIN,AS_GPIO);
+    gpio_setup_up_down_resistor(OPEN_LOCK_CHECK_PIN, PM_PIN_UP_DOWN_FLOAT);
+    gpio_set_input_en(OPEN_LOCK_CHECK_PIN,1);
+    gpio_set_output_en(OPEN_LOCK_CHECK_PIN, 0);
+
+    //MOTOR管脚初始化
+	gpio_set_func(MOTOR_PWM0,AS_GPIO);
+	gpio_setup_up_down_resistor(MOTOR_PWM0, PM_PIN_PULLUP_10K);
+	gpio_set_input_en(MOTOR_PWM0,0);
+	gpio_set_output_en(MOTOR_PWM0, 1);
+	gpio_write(MOTOR_PWM0,OFF);
+
+	gpio_set_func(MOTOR_PWM1,AS_GPIO);
+	gpio_setup_up_down_resistor(MOTOR_PWM1, PM_PIN_PULLUP_10K);
+	gpio_set_input_en(MOTOR_PWM1,0);
+	gpio_set_output_en(MOTOR_PWM1, 1);
+	gpio_write(MOTOR_PWM1,OFF);
+
 	//展讯模块控制上下电管脚
 	gpio_set_func(RF_POWERON_PIN,AS_GPIO);
-	gpio_setup_up_down_resistor(RF_POWERON_PIN, PM_PIN_PULLUP_10K);
+	gpio_setup_up_down_resistor(RF_POWERON_PIN, PM_PIN_UP_DOWN_FLOAT);
 	gpio_set_input_en(RF_POWERON_PIN,0);
 	gpio_set_output_en(RF_POWERON_PIN, 1);
 	gpio_write(RF_POWERON_PIN,OFF);
+
+	//展讯模块复位管脚
+	gpio_set_func(SC6531_RESET,AS_GPIO);
+	gpio_setup_up_down_resistor(SC6531_RESET, PM_PIN_UP_DOWN_FLOAT);
+	gpio_set_input_en(SC6531_RESET,0);
+	gpio_set_output_en(RF_POWERON_PIN, 1);
+	gpio_write(SC6531_RESET,ON);
 }
 /*
  * falsh_init
@@ -403,10 +422,11 @@ static user_uart_init(void)
 void unlock_lock_state_polling(void)
 {
 	u32 start_tick = clock_time();
-    if((!gpio_read(LPLUG_IN_PIN))&&(gpio_read(MPOS_IN_PIN)))//开锁状态
+#if 0
+    if((!gpio_read(CLOSE_LOCK_CHECK_PIN))&&(gpio_read(OPEN_LOCK_CHECK_PIN)))//开锁状态
     {
     	while(!clock_time_exceed(start_tick,20*1000));
-    	if((!gpio_read(LPLUG_IN_PIN))&&(gpio_read(MPOS_IN_PIN)))
+    	if((!gpio_read(CLOSE_LOCK_CHECK_PIN))&&(gpio_read(OPEN_LOCK_CHECK_PIN)))
     	{
 			if(lock_unlock_state == lock_unlock_state_lock)
 			{
@@ -415,15 +435,17 @@ void unlock_lock_state_polling(void)
 			lock_unlock_state = lock_unlock_state_unlock;
     	}
     }
-    if((gpio_read(LPLUG_IN_PIN))&&(!gpio_read(MPOS_IN_PIN)))//闭锁状态
+#endif
+    if(Flag.is_lock_event_occur)
 	{
+    	Flag.is_lock_event_occur = 0;
     	while(!clock_time_exceed(start_tick,20*1000));
-    	if((gpio_read(LPLUG_IN_PIN))&&(!gpio_read(MPOS_IN_PIN)))
+    	if(!gpio_read(CLOSE_LOCK_CHECK_PIN))
     	{
-			if(lock_unlock_state == lock_unlock_state_unlock)
-			{
+			//if(lock_unlock_state == lock_unlock_state_unlock)
+			//{
 				printf("Lock is switch off!\r\n");
-			}
+			//}
 			lock_unlock_state = lock_unlock_state_lock;
     	}
 	}
@@ -564,7 +586,7 @@ void user_init()
     user_timer_init();
 	user_gpio_init();
 	user_led_init();
-	user_uart_init();
+	//user_uart_init();
 	user_flash_init();
 }
 /*
@@ -592,6 +614,11 @@ void main_loop()
     {
     	Flag.is_return_domain_via_ble = 0;
     	ble_return_domain_operation();
+    }
+    if(Flag.is_turnon_lock)
+    {
+    	Flag.is_turnon_lock = 0;
+        Lock_turnon_operation();
     }
 }
 
