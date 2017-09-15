@@ -18,6 +18,7 @@ SIZEDUMMY :=
 SUBDIRS := \
 vendor/common \
 vendor/826x_module \
+vendor/826x_module/slip_protocol \
 vendor/826x_module/da213 \
 vendor/826x_module/MC3416 \
 vendor/826x_module/GPS_GPRS_Communicate \

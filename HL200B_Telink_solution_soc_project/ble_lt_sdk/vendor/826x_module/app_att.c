@@ -79,8 +79,11 @@ extern u8   g_new_password[6];
 extern u8   g_new_key[16];
 extern u8   g_GSM_ver[GSM_VER_LEN];
 extern u8   g_lock_ICCID[LOCK_ICCID_LEN];
+extern u8   g_lock_IMEI[LOCK_IMEI_LEN];
+extern u8   g_lock_SN[LOCK_SN_LEN];
 extern u8   g_lock_domains[LOCK_DOMAIN_LEN];
 extern u8   g_is_order_num_unlock;
+extern Flag_t Flag;
 
 extern void AES_ECB_Encryption(u8 *key, u8 *plaintext, u8 *encrypted_data);
 extern void AES_ECB_Decryption(u8 *key, u8 *encrypted_data, u8 *decrypted_data);
@@ -309,14 +312,30 @@ typedef struct
 	u8 L;            //L为ICCID字节数
 	u8 iccid[13];    //可能为多帧
 }get_ICCID_ack_t;
-
+//查询锁的 ICCID指令后返回： 05 29  L IMEI
+typedef struct
+{
+	u8 tokenack0;    //05
+	u8 tokenack1;	 //29
+	u8 L;            //L为IMEI字节数
+	u8 imei[13];    //可能为多帧
+}get_IMEI_ack_t;
+//查询锁的 SN指令后返回： 05 41  L SN
+typedef struct
+{
+	u8 tokenack0;    //05
+	u8 tokenack1;	 //41
+	u8 L;            //L为IMEI字节数
+	u8 SN[13];       //可能为多帧
+}get_SN_ack_t;
 //查询锁的域名指令后返回： 05 30 T CI DOMAIN[12]
-typedef struct{
-	u8 tokenAck1;    //05
-	u8 tokenAck2;	 //30
+typedef struct
+{
+	u8 tokenack0;    //05
+	u8 tokenack1;	 //30
 	u8 T;	         //T为域名总长度
 	u8 CI;           //CI为当前序号（从0开始计数）
-	u8 DOMAIN[12];      //DOMAIN为锁的域名，通常为 ASCII 字符。
+	u8 DOMAIN[50];      //DOMAIN为锁的域名，通常为 ASCII 字符。
 }get_lock_domains_ack_t;
 
 //开锁指令后返回： 05 02 01 RET TL YY YY MM DD HH mm ss FILL[4]
@@ -456,6 +475,40 @@ int hemiaolock_read(void * p)
 	return 0;
 }
 /************************************************************
+ble_return_domain_operation
+************************************************************/
+void ble_return_domain_operation(void)
+{
+	u8 current_index = 0;
+	u8 total_index = (LOCK_DOMAIN_LEN+11)/12;
+	u8 current_transmiting[12];
+	u8 tmp_buffer[20];
+	u8 encrypted_data[16];//S->M encryption
+	get_lock_domains_ack_t* get_lock_domains_ack = (get_lock_domains_ack_t*)tmp_buffer;
+	u32 start_tick;
+    for(;current_index<total_index;current_index++)
+    {
+    	memset(current_transmiting,0,sizeof(current_transmiting));
+    	if(current_index == (total_index-1))
+    		memcpy(current_transmiting,(g_lock_domains+current_index*12),(LOCK_DOMAIN_LEN-current_index*12));
+    	else
+    		memcpy(current_transmiting,(g_lock_domains+current_index*12),sizeof(current_transmiting));
+		get_lock_domains_ack->tokenack0 = 0x05;
+		get_lock_domains_ack->tokenack1 = 0x30;
+		get_lock_domains_ack->T = LOCK_DOMAIN_LEN;
+		get_lock_domains_ack->CI = current_index;
+		memcpy(get_lock_domains_ack->DOMAIN, current_transmiting, 12);
+		printf("rsponse data: ");foreach(i, 16){PrintHex(*((u8*)get_lock_domains_ack+i));}printf("\r\n");
+		AES_ECB_Encryption(g_private_AES_key, (u8*)get_lock_domains_ack, encrypted_data);
+		bls_att_pushNotifyData(BleLockChar2DataHdl, encrypted_data, 16);
+		if(current_index != (total_index-1))
+		{
+			start_tick = clock_time();
+			while(!clock_time_exceed(start_tick,10*1000));
+		}
+    }
+}
+/************************************************************
 token check
 ************************************************************/
 static u8 gap_check_token_is_met(u32 *token_ptr)
@@ -506,98 +559,147 @@ int sprocomm_lock_write_evt_handler(rf_packet_att_write_t *p)
 			}
 		    case GET_LOCK_GSM_ID_CMD://0x05 0x23
 		    {
-                if(gap_check_token_is_met(decrypted_data+4))
+                if(!gap_check_token_is_met(decrypted_data+4))
                 {
-                	printf("GET_LOCK_GSM_ID_CMD.\r\n");
-					get_GSM_ID_ack_t* get_GSM_ID_ack = (get_GSM_ID_ack_t*)p;
-					get_GSM_ID_ack->tokenack0 = 0x05;
-					get_GSM_ID_ack->tokenack1 = 0x23;
-					get_GSM_ID_ack->tokenack2 = 0x06;
-					memcpy(get_GSM_ID_ack->GSM_ID, g_GSM_ID, 6);
-					printf("rsponse data: ");foreach(i, 16){PrintHex(*((u8*)get_GSM_ID_ack+i));}printf("\r\n");
-					AES_ECB_Encryption(g_private_AES_key, (u8*)get_GSM_ID_ack, encrypted_data);
-					bls_att_pushNotifyData(BleLockChar2DataHdl, encrypted_data, 16);
+                	break;
                 }
+				printf("GET_LOCK_GSM_ID_CMD.\r\n");
+				get_GSM_ID_ack_t* get_GSM_ID_ack = (get_GSM_ID_ack_t*)p;
+				get_GSM_ID_ack->tokenack0 = 0x05;
+				get_GSM_ID_ack->tokenack1 = 0x23;
+				get_GSM_ID_ack->tokenack2 = 0x06;
+				memcpy(get_GSM_ID_ack->GSM_ID, g_GSM_ID, 6);
+				printf("rsponse data: ");foreach(i, 16){PrintHex(*((u8*)get_GSM_ID_ack+i));}printf("\r\n");
+				AES_ECB_Encryption(g_private_AES_key, (u8*)get_GSM_ID_ack, encrypted_data);
+				bls_att_pushNotifyData(BleLockChar2DataHdl, encrypted_data, 16);
 		    	break;
 		    }
 		    case GET_LOCK_WORK_PATTERN_CMD://0x05 0x20
 		    {
-		    	if(gap_check_token_is_met(decrypted_data+4))
+		    	if(!gap_check_token_is_met(decrypted_data+4))
 		    	{
-		    		printf("GET_LOCK_WORK_PATTERN_CMD.\r\n");
-					get_lock_work_pattern_ack_t* get_lock_work_pattern_ack = (get_lock_work_pattern_ack_t*)p;
-					get_lock_work_pattern_ack->tokenack0 = 0x05;
-					get_lock_work_pattern_ack->tokenack1 = 0x20;
-					get_lock_work_pattern_ack->tokenack2 = 0x01;
-					get_lock_work_pattern_ack->MOD = g_curr_lock_work_pattern;//MOD 为锁工作模式，00 表示正常模式，01 表示运输模式
-					printf("rsponse data: ");foreach(i, 16){PrintHex(*((u8*)get_lock_work_pattern_ack+i));}printf("\r\n");
-					AES_ECB_Encryption(g_private_AES_key, (u8*)get_lock_work_pattern_ack, encrypted_data);
-					bls_att_pushNotifyData(BleLockChar2DataHdl, encrypted_data, 16);
+		    		break;
 		    	}
+				printf("GET_LOCK_WORK_PATTERN_CMD.\r\n");
+				get_lock_work_pattern_ack_t* get_lock_work_pattern_ack = (get_lock_work_pattern_ack_t*)p;
+				get_lock_work_pattern_ack->tokenack0 = 0x05;
+				get_lock_work_pattern_ack->tokenack1 = 0x20;
+				get_lock_work_pattern_ack->tokenack2 = 0x01;
+				get_lock_work_pattern_ack->MOD = g_curr_lock_work_pattern;//MOD 为锁工作模式，00 表示正常模式，01 表示运输模式
+				printf("rsponse data: ");foreach(i, 16){PrintHex(*((u8*)get_lock_work_pattern_ack+i));}printf("\r\n");
+				AES_ECB_Encryption(g_private_AES_key, (u8*)get_lock_work_pattern_ack, encrypted_data);
+				bls_att_pushNotifyData(BleLockChar2DataHdl, encrypted_data, 16);
 		    	break;
 		    }
 		    case GET_LOCK_WORKING_STATUS_CMD://0x05 0x22
 		    {
-		    	if(gap_check_token_is_met(decrypted_data+4))
+		    	if(!gap_check_token_is_met(decrypted_data+4))
 		    	{
-		    		printf("GET_LOCK_WORKING_STATUS_CMD.\r\n");
-					get_lock_work_status_ack_t* get_lock_work_status_ack = (get_lock_work_status_ack_t*)p;
-					get_lock_work_status_ack->tokenack0 = 0x05;
-					get_lock_work_status_ack->tokenack1 = 0x22;
-					get_lock_work_status_ack->tokenack2 = 0x08;
-					get_lock_work_status_ack->R.R0.lock_switch_status = g_curr_lock_state;
-					get_lock_work_status_ack->R.R0.vib_func = g_curr_status_vib_func;
-					get_lock_work_status_ack->R.R0.vib_state = g_curr_status_vib_status;
-					get_lock_work_status_ack->R.R0.chg_dischg_state = g_curr_chg_dischg_state;
-					get_lock_work_status_ack->R.R1_GSM_status = g_GSM_status;
-					get_lock_work_status_ack->R.R2_last_GPRS_online_need_time = g_last_GPRS_online_need_time;
-					get_lock_work_status_ack->R.R3_last_GPRS_rssi_val = g_last_GPRS_rssi_val;
-					get_lock_work_status_ack->R.R4_GPS_status = g_GPS_status;
-					get_lock_work_status_ack->R.R5_last_GPS_location_need_time = g_last_GPS_location_need_time;
-					get_lock_work_status_ack->R.R6_last_GPS_stars_received_num = g_last_GPS_stars_received_num;
-					get_lock_work_status_ack->vl = 2;//电压值volt的长度,这里默认2
-					get_lock_work_status_ack->volt = g_curr_vol;
-					get_lock_work_status_ack->tl = 2;//温度值temp的长度,这里默认2
-					get_lock_work_status_ack->temp = g_curr_temp;
-					printf("rsponse data: ");foreach(i, 16){PrintHex(*((u8*)get_lock_work_status_ack+i));}printf("\r\n");
-					AES_ECB_Encryption(g_private_AES_key, (u8*)get_lock_work_status_ack, encrypted_data);
-					bls_att_pushNotifyData(BleLockChar2DataHdl, encrypted_data, 16);
+		    		break;
 		    	}
+				printf("GET_LOCK_WORKING_STATUS_CMD.\r\n");
+				get_lock_work_status_ack_t* get_lock_work_status_ack = (get_lock_work_status_ack_t*)p;
+				get_lock_work_status_ack->tokenack0 = 0x05;
+				get_lock_work_status_ack->tokenack1 = 0x22;
+				get_lock_work_status_ack->tokenack2 = 0x08;
+				get_lock_work_status_ack->R.R0.lock_switch_status = g_curr_lock_state;
+				get_lock_work_status_ack->R.R0.vib_func = g_curr_status_vib_func;
+				get_lock_work_status_ack->R.R0.vib_state = g_curr_status_vib_status;
+				get_lock_work_status_ack->R.R0.chg_dischg_state = g_curr_chg_dischg_state;
+				get_lock_work_status_ack->R.R1_GSM_status = g_GSM_status;
+				get_lock_work_status_ack->R.R2_last_GPRS_online_need_time = g_last_GPRS_online_need_time;
+				get_lock_work_status_ack->R.R3_last_GPRS_rssi_val = g_last_GPRS_rssi_val;
+				get_lock_work_status_ack->R.R4_GPS_status = g_GPS_status;
+				get_lock_work_status_ack->R.R5_last_GPS_location_need_time = g_last_GPS_location_need_time;
+				get_lock_work_status_ack->R.R6_last_GPS_stars_received_num = g_last_GPS_stars_received_num;
+				get_lock_work_status_ack->vl = 2;//电压值volt的长度,这里默认2
+				get_lock_work_status_ack->volt = g_curr_vol;
+				get_lock_work_status_ack->tl = 2;//温度值temp的长度,这里默认2
+				get_lock_work_status_ack->temp = g_curr_temp;
+				printf("rsponse data: ");foreach(i, 16){PrintHex(*((u8*)get_lock_work_status_ack+i));}printf("\r\n");
+				AES_ECB_Encryption(g_private_AES_key, (u8*)get_lock_work_status_ack, encrypted_data);
+				bls_att_pushNotifyData(BleLockChar2DataHdl, encrypted_data, 16);
 		    	break;
 		    }
 		    case GET_LOCK_GSM_VER_CMD://0x05 0x24
 		    {
-		    	if(gap_check_token_is_met(decrypted_data+4))
+		    	if(!gap_check_token_is_met(decrypted_data+4))
 		    	{
-					printf("GET_LOCK_GSM_VER_CMD.\r\n");
-					get_GSM_VER_ack_t* get_GSM_VER_ack = (get_GSM_VER_ack_t*)p;
-					get_GSM_VER_ack->tokenack0 = 0x05;
-					get_GSM_VER_ack->tokenack1 = 0x24;
-					get_GSM_VER_ack->tokenack2 = 0x01;
-					get_GSM_VER_ack->N = GSM_VER_LEN;
-					memcpy(get_GSM_VER_ack->ver, g_GSM_ver, GSM_VER_LEN);
-					printf("rsponse data: ");foreach(i, 16){PrintHex(*((u8*)get_GSM_VER_ack+i));}printf("\r\n");
-					AES_ECB_Encryption(g_private_AES_key, (u8*)get_GSM_VER_ack, encrypted_data);
-					bls_att_pushNotifyData(BleLockChar2DataHdl, encrypted_data, 16);
+		    		break;
 		    	}
+				printf("GET_LOCK_GSM_VER_CMD.\r\n");
+				get_GSM_VER_ack_t* get_GSM_VER_ack = (get_GSM_VER_ack_t*)p;
+				get_GSM_VER_ack->tokenack0 = 0x05;
+				get_GSM_VER_ack->tokenack1 = 0x24;
+				get_GSM_VER_ack->tokenack2 = 0x01;
+				get_GSM_VER_ack->N = GSM_VER_LEN;
+				memcpy(get_GSM_VER_ack->ver, g_GSM_ver, GSM_VER_LEN);
+				printf("rsponse data: ");foreach(i, 16){PrintHex(*((u8*)get_GSM_VER_ack+i));}printf("\r\n");
+				AES_ECB_Encryption(g_private_AES_key, (u8*)get_GSM_VER_ack, encrypted_data);
+				bls_att_pushNotifyData(BleLockChar2DataHdl, encrypted_data, 16);
 				break;
 		    }
-		    case GET_LOCK_ICCID_CMD:
+		    case GET_LOCK_ICCID_CMD://0x05 0x28
 		    {
-		    	if(gap_check_token_is_met(decrypted_data+4))
+		    	if(!gap_check_token_is_met(decrypted_data+4))
 				{
-					printf("GET_LOCK_GSM_VER_CMD.\r\n");
-					get_ICCID_ack_t* get_ICCID_ack = (get_ICCID_ack_t*)p;
-					get_ICCID_ack->tokenack0 = 0x05;
-					get_ICCID_ack->tokenack1 = 0x28;
-					get_ICCID_ack->L = LOCK_ICCID_LEN;
-					memcpy(get_ICCID_ack->iccid, g_lock_ICCID, LOCK_ICCID_LEN);
-					printf("rsponse data: ");foreach(i, 16){PrintHex(*((u8*)get_ICCID_ack+i));}printf("\r\n");
-					AES_ECB_Encryption(g_private_AES_key, (u8*)get_ICCID_ack, encrypted_data);
-					bls_att_pushNotifyData(BleLockChar2DataHdl, encrypted_data, 16);
+		    		break;
 				}
+				printf("GET_LOCK_ICCID_CMD.\r\n");
+				get_ICCID_ack_t* get_ICCID_ack = (get_ICCID_ack_t*)p;
+				get_ICCID_ack->tokenack0 = 0x05;
+				get_ICCID_ack->tokenack1 = 0x28;
+				get_ICCID_ack->L = LOCK_ICCID_LEN;
+				memcpy(get_ICCID_ack->iccid, g_lock_ICCID, LOCK_ICCID_LEN);
+				printf("rsponse data: ");foreach(i, 16){PrintHex(*((u8*)get_ICCID_ack+i));}printf("\r\n");
+				AES_ECB_Encryption(g_private_AES_key, (u8*)get_ICCID_ack, encrypted_data);
+				bls_att_pushNotifyData(BleLockChar2DataHdl, encrypted_data, 16);
 		    	break;
 		    }
+		    case GET_LOCK_IMEI_CMD://0x05 0x29
+			{
+				if(!gap_check_token_is_met(decrypted_data+4))
+				{
+					break;
+				}
+				printf("GET_LOCK_IMEI_CMD.\r\n");
+				get_IMEI_ack_t* get_IMEI_ack = (get_IMEI_ack_t*)p;
+				get_IMEI_ack->tokenack0 = 0x05;
+				get_IMEI_ack->tokenack1 = 0x29;
+				get_IMEI_ack->L = LOCK_IMEI_LEN;
+				memcpy(get_IMEI_ack->imei, g_lock_IMEI, LOCK_IMEI_LEN);
+				printf("rsponse data: ");foreach(i, 16){PrintHex(*((u8*)get_IMEI_ack+i));}printf("\r\n");
+				AES_ECB_Encryption(g_private_AES_key, (u8*)get_IMEI_ack, encrypted_data);
+				bls_att_pushNotifyData(BleLockChar2DataHdl, encrypted_data, 16);
+				break;
+			}
+		    case GET_LOCK_SN_CMD://0x05 0x41
+			{
+				if(!gap_check_token_is_met(decrypted_data+4))
+				{
+					break;
+				}
+				printf("GET_LOCK_SN_CMD.\r\n");
+				get_SN_ack_t* get_SN_ack = (get_SN_ack_t*)p;
+				get_SN_ack->tokenack0 = 0x05;
+				get_SN_ack->tokenack1 = 0x42;
+				get_SN_ack->L = LOCK_SN_LEN;
+				memcpy(get_SN_ack->SN, g_lock_SN, LOCK_SN_LEN);
+				printf("rsponse data: ");foreach(i, 16){PrintHex(*((u8*)get_SN_ack+i));}printf("\r\n");
+				AES_ECB_Encryption(g_private_AES_key, (u8*)get_SN_ack, encrypted_data);
+				bls_att_pushNotifyData(BleLockChar2DataHdl, encrypted_data, 16);
+				break;
+			}
+		    case GET_LOCK_DOMAINS_CMD:
+			{
+				if(!gap_check_token_is_met(decrypted_data+4))
+				{
+					break;
+				}
+				Flag.is_return_domain_via_ble = 1;
+				printf("GET_LOCK_DOMAINS_CMD.\n");
+				break;
+			}
 			default:
 			{
 				break;

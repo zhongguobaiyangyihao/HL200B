@@ -17,18 +17,6 @@
 #define WAIT_TIME_SHORT               (5000/GPRS_GPS_MODULE_COMMUNICATE_INTERVAL)
 #define WAIT_TIME_MIDDLE              (10000/GPRS_GPS_MODULE_COMMUNICATE_INTERVAL)
 
-
-typedef struct
-{
-	u8  reserved0                     : 1;
-	u8  reserved1                     : 1;
-	u8  reserved2                     : 1;
-	u8  reserved3                     : 1;
-	u8  reserved4                     : 1;
-	u8  reserved5                     : 1;
-	u8  is_module_excute              : 1;
-	u8  is_module_transmit            : 1;
-}Flag_t;
 typedef enum
 {
 	module_turnon_pwron = 0,

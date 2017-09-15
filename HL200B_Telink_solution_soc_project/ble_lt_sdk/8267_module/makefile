@@ -11,6 +11,7 @@ RM := rm -rf
 -include subdir.mk
 -include vendor/common/subdir.mk
 -include vendor/826x_module/subdir.mk
+-include vendor/826x_module/slip_protocol/subdir.mk
 -include vendor/826x_module/da213/subdir.mk
 -include vendor/826x_module/MC3416/subdir.mk
 -include vendor/826x_module/GPS_GPRS_Communicate/subdir.mk
@@ -45,7 +46,7 @@ main-build: HL200B_Telink_solution_project.elf secondary-outputs
 HL200B_Telink_solution_project.elf: $(OBJS) $(USER_OBJS)
 	@echo 'Building target: $@'
 	@echo 'Invoking: TC32 C Linker'
-	tc32-elf-ld --gc-sections -L"E:\Kyle\项目开发\HL200B\HL200B_Telink_solution_soc_projectV1.3\ble_lt_sdk\proj_lib" -T ../boot.link -o"HL200B_Telink_solution_project.elf" $(OBJS) $(USER_OBJS) $(LIBS)
+	tc32-elf-ld --gc-sections -L"E:\Kyle\git_repository\git_hub\HL200B\HL200B_Telink_solution_soc_project\ble_lt_sdk\proj_lib" -T ../boot.link -o"HL200B_Telink_solution_project.elf" $(OBJS) $(USER_OBJS) $(LIBS)
 	@echo 'Finished building target: $@'
 	@echo ' '
 
@@ -73,7 +74,7 @@ clean:
 	-@echo ' '
 
 pre-build:
-	-"E:\Kyle\项目开发\HL200B\HL200B_Telink_solution_soc_projectV1.3\ble_lt_sdk/getver.sh"
+	-"E:\Kyle\git_repository\git_hub\HL200B\HL200B_Telink_solution_soc_project\ble_lt_sdk/getver.sh"
 	-@echo ' '
 
 secondary-outputs: $(LST) $(FLASH_IMAGE) $(SIZEDUMMY)

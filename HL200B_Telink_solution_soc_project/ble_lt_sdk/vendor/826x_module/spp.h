@@ -26,7 +26,9 @@
 #define GET_LOCK_GSM_ID_CMD                 (0x2305)
 #define GET_LOCK_GSM_VER_CMD                (0x2405)
 #define GET_LOCK_ICCID_CMD                  (0x2805)
-#define GET_LOCK_DOMAINS_CMD                (0x00013005) //Query lock domains
+#define GET_LOCK_IMEI_CMD                   (0x2905)
+#define GET_LOCK_SN_CMD                     (0x4105)
+#define GET_LOCK_DOMAINS_CMD                (0x3005) //Query lock domains
 #define START_OTA_CMD                       (0x01010103)
 
 #define CMD_LEN3BYTES(i)                    (i & 0x00ffffff)

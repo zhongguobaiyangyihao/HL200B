@@ -61,6 +61,8 @@ extern void module_transmit_receive_handler(void);
 extern void module_pwron(void);
 extern void module_pwroff(void);
 extern void module_schedule_handler(void);
+extern void ble_return_domain_operation(void);
+extern void battery_power_check(void);
 /**************************************************************************/
 /////////////////////////////// HemiaoLock concerned ///////////////////////////////////////////
 u32 g_current_time;
@@ -72,8 +74,10 @@ u8  g_curr_status_vib_func = normal;
 u8  g_curr_status_vib_status = motionless;
 u8  g_curr_chg_dischg_state = discharge;
 u8  g_GSM_ID[6] = {1,2,3,4,5,6};
-u8  g_GSM_ver[GSM_VER_LEN] = {GSM_VER_LEN};
+u8  g_GSM_ver[GSM_VER_LEN] = {GSM_VER};
 u8  g_lock_ICCID[LOCK_ICCID_LEN] = {LOCK_ICCID};
+u8  g_lock_IMEI[LOCK_IMEI_LEN] = {LOCK_IMEI};
+u8  g_lock_SN[LOCK_SN_LEN] = {LOCK_SN};
 u8  g_lock_domains[LOCK_DOMAIN_LEN] = {LOCK_DOMAIN};
 u8  g_is_order_num_unlock;//是否是订单号开锁，如果是，手动关锁，锁会自动发送订单号关锁指令给手机
 u8  g_curr_lock_work_pattern = 0x00;
@@ -432,7 +436,8 @@ static void ble_init(void)
 	u8  MAC_Buffer[6];
 	u8  tbl_mac [] = {0x1c, 0xfb, 0x62, 0x38, 0xc1, 0xa4};
 	/*advertising packet*/
-	u8 tbl_advData[] = {
+	u8 tbl_advData[] =
+	{
 			 0x02, 0x01,                            //BLE_GAP_AD_TYPE_FLAGS
 				   0x05, 							// BLE limited discoverable mode and BR/EDR not supported
 	#if SUPPORT_WETCHAT_ENABLE                      //if support wechat,
@@ -453,7 +458,8 @@ static void ble_init(void)
 				   0xE7, 0xFE,                      //广播数据中的 Service UUIDs 段，必须包含 FEE7 这个 16 位类型的UUID
 		};
 	/*scan response packet*/
-	u8 tbl_scanRsp [] = {
+	u8 tbl_scanRsp [] =
+	{
 				0x0E, 0x09,                         //BLE_GAP_AD_TYPE_COMPLETE_LOCAL_NAME
 				'S', 'p', 'r', 'o', 'c', 'o', 'm', 'm',
 				'_', 'L', 'o', 'c', 'k'             //scan response name "Sprocomm_Lock"
@@ -561,21 +567,15 @@ void user_init()
 	user_uart_init();
 	user_flash_init();
 }
-
-extern void battery_power_check(void);
-/////////////////////////////////////////////////////////////////////
-// main loop flow
-/////////////////////////////////////////////////////////////////////
-void main_loop ()
+/*
+ * main loop flow
+ */
+void main_loop()
 {
 	static u32 tick_loop;
-
 	tick_loop ++;
-
 	////////////////////////////////////// BLE entry /////////////////////////////////
 	blt_sdk_main_loop();
-
-
 	////////////////////////////////////// UI entry /////////////////////////////////
 #if (BATT_CHECK_ENABLE)
 	battery_power_check();
@@ -587,6 +587,11 @@ void main_loop ()
     {
     	Flag.is_module_excute = 0;
     	user_timer0_timeout_handler();
+    }
+    if(Flag.is_return_domain_via_ble)
+    {
+    	Flag.is_return_domain_via_ble = 0;
+    	ble_return_domain_operation();
     }
 }
 

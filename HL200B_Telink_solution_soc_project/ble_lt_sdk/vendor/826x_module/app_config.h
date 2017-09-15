@@ -37,6 +37,17 @@ typedef enum
 	lock_unlock_state_lock = 1,
 	lock_unlock_state_unlock = 2
 }lock_unlock_state_t;
+typedef struct
+{
+	u8  reserved0                     : 1;
+	u8  reserved1                     : 1;
+	u8  reserved2                     : 1;
+	u8  reserved3                     : 1;
+	u8  reserved4                     : 1;
+	u8  is_return_domain_via_ble      : 1;
+	u8  is_module_excute              : 1;
+	u8  is_module_transmit            : 1;
+}Flag_t;
 ///////////////////// RTC 时间相关的 /////////////////////////
 typedef struct{
 	u16 year;
@@ -74,9 +85,13 @@ enum work_status_R0
 
 ////////////////////// GSM concerned (test)///////////////////////
 #define GSM_VER_LEN                         12
-#define GSM_VER                             '2', '0', '1', '7', '0', '9', '0', '1', '1', '6', '1', '1'
-#define LOCK_ICCID_LEN                           10
-#define LOCK_ICCID                          '2', '0', '1', '7', '0', '9', '0', '1', '1', '6'
+#define GSM_VER                             '2', '1', '1', '7', '1', '5', '2', '1', '1', '6', '1', '1'
+#define LOCK_ICCID_LEN                      10
+#define LOCK_ICCID                          0x12, 0x34, 0x56, 0x78, 0x00, 0x12, 0x34, 0x56, 0x78,0x00
+#define LOCK_IMEI_LEN                       8
+#define LOCK_IMEI                           0x12, 0x34, 0x56, 0x78, 0x12, 0x34, 0x56, 0x78
+#define LOCK_SN_LEN                         13
+#define LOCK_SN                             '1', 'P', 'Q', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A'
 #define LOCK_DOMAIN_LEN                     12
 #define LOCK_DOMAIN                         'r', 'o', 'c', 'o', 'l', 'o', 'c', 'k', '.', 'c', 'o', 'm'
 
