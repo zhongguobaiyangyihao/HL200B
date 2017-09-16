@@ -40,14 +40,14 @@ int		module_task_busy;
 u32 	g_token;//Token
 u8      g_private_AES_key[16] 	= { 32, 87, 47, 82, 54, 75, 63, 71, 48, 80, 65, 88, 17, 99, 45, 43};//Key fixing
 //u8      g_private_AES_key[16] 	= {0x3A, 0x60, 0x43, 0x2A, 0x5C, 0x01, 0x21, 0x1F, 0x29, 0x1E, 0x0F, 0x4E, 0x0C, 0x13, 0x28, 0x25};//Key fixing
-extern  u8               lock_unlock_state;
+device_state_t           device_state;
 extern  Flag_t           Flag;
 /**************************************************************************/
 static void user_timer0_timeout_handler(void);
 void 	AES_ECB_Encryption(u8 *key, u8 *plaintext, u8 *encrypted_data);
 void 	AES_ECB_Decryption(u8 *key, u8 *encrypted_data, u8 *decrypted_data);
 void TIMER0_Timeout_handler(void);
-void unlock_lock_state_polling(void);
+extern void lock_onoff_state_polling(void);
 extern void my_att_init(void);
 extern s8 gsensor_init(void);
 extern void gsensor_gpio_interrupt_init(void);
@@ -71,7 +71,6 @@ u32 g_current_time;
 u32 g_locked_time;
 u16 g_serialNum;
 u8  g_curr_power_level;
-u8  g_curr_lock_state = close;
 u8  g_curr_status_vib_func = normal;
 u8  g_curr_status_vib_status = motionless;
 u8  g_curr_chg_dischg_state = discharge;
@@ -417,40 +416,6 @@ static user_uart_init(void)
 	blc_register_hci_handler(rx_from_uart_cb,tx_to_uart_cb);				//customized uart handler
 }
 /*
- * unlock_lock_state_polling
- */
-void unlock_lock_state_polling(void)
-{
-	u32 start_tick = clock_time();
-#if 0
-    if((!gpio_read(CLOSE_LOCK_CHECK_PIN))&&(gpio_read(OPEN_LOCK_CHECK_PIN)))//开锁状态
-    {
-    	while(!clock_time_exceed(start_tick,20*1000));
-    	if((!gpio_read(CLOSE_LOCK_CHECK_PIN))&&(gpio_read(OPEN_LOCK_CHECK_PIN)))
-    	{
-			if(lock_unlock_state == lock_unlock_state_lock)
-			{
-				printf("Lock is switch on!\r\n");
-			}
-			lock_unlock_state = lock_unlock_state_unlock;
-    	}
-    }
-#endif
-    if(Flag.is_lock_event_occur)
-	{
-    	Flag.is_lock_event_occur = 0;
-    	while(!clock_time_exceed(start_tick,20*1000));
-    	if(!gpio_read(CLOSE_LOCK_CHECK_PIN))
-    	{
-			//if(lock_unlock_state == lock_unlock_state_unlock)
-			//{
-				printf("Lock is switch off!\r\n");
-			//}
-			lock_unlock_state = lock_unlock_state_lock;
-    	}
-	}
-}
-/*
  * ble init
  */
 static void ble_init(void)
@@ -472,7 +437,7 @@ static void ble_init(void)
 				   tbl_mac[5], tbl_mac[4], tbl_mac[3], tbl_mac[2], tbl_mac[1], tbl_mac[0], //MAC addresse
 				   IDL,                             //IDL产品编号低字节，这 2 个字节由物联锁统一进行分配和管理
 				   g_curr_power_level,              //PWR 是当前电量级别
-				   g_curr_lock_state,               //STA 是当前锁的开关状态
+				   (u8)device_state.lock_onoff_state,  //STA 是当前锁的开关状态
 				   IDH,                             //IDH产品编号高字节，IDL 和 IDH 组成 16 位的产品编号，这 2 个字节由物联锁统一进行分配和管理
 				   VER,                             //VER 是蓝牙锁固件版本号，由固件开发人员自行维护，典型是拆成 2 个 4 位的 BCD码
 	#endif
@@ -531,6 +496,23 @@ void user_init()
 	/*USER application initialization */
 	s8  err_code = 0;
 	memset(&Flag,0,sizeof(Flag));
+	memset(&device_state,0,sizeof(device_state));
+	err_code = gsensor_init();
+	if(err_code == 0)
+	{
+		printf("Gsensor init success.\r\n");
+		gsensor_pwr_on();
+	}
+	else
+	{
+		printf("Gsensor init fail,err_code = 0x%x.\r\n",err_code);
+	}
+	user_gpio_interrupt_init();
+	user_timer_init();
+	user_gpio_init();
+	user_led_init();
+	//user_uart_init();
+	user_flash_init();
 	ble_init();
 	usb_dp_pullup_en(1);                           //open USB enum
 #if SIG_PROC_ENABLE
@@ -572,22 +554,7 @@ void user_init()
 	#endif
 #endif
 	ui_advertise_begin_tick = clock_time();
-	err_code = gsensor_init();
-	if(err_code == 0)
-	{
-		printf("Gsensor init success.\r\n");
-		gsensor_pwr_on();
-	}
-	else
-	{
-		printf("Gsensor init fail,err_code = 0x%x.\r\n",err_code);
-	}
-	user_gpio_interrupt_init();
-    user_timer_init();
-	user_gpio_init();
-	user_led_init();
-	//user_uart_init();
-	user_flash_init();
+
 }
 /*
  * main loop flow
@@ -604,7 +571,7 @@ void main_loop()
 #endif
 	//  add spp UI task
 	app_power_management ();
-	unlock_lock_state_polling();
+	lock_onoff_state_polling();
     if(Flag.is_module_excute)
     {
     	Flag.is_module_excute = 0;

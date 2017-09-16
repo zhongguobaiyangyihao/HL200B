@@ -6,7 +6,6 @@
 #include "../../proj_lib/ble/blt_config.h"
 
 /**********************************/
-u8               lock_unlock_state = lock_unlock_state_lock;//Ä¬ÈÏ±ÕËø×´Ì¬
 extern my_fifo_t uart_rx_fifo;
 extern void user_init();
 extern _attribute_ram_code_ void gsensor_gpio_irq_proc(void);

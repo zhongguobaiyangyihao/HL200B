@@ -38,8 +38,8 @@ extern "C" {
 
 typedef enum
 {
-	lock_unlock_state_lock = 1,
-	lock_unlock_state_unlock = 2
+	lock_onoff_state_on = 0,
+	lock_onoff_state_off = 1
 }lock_unlock_state_t;
 typedef struct
 {
@@ -47,11 +47,23 @@ typedef struct
 	u8  reserved1                     : 1;
 	u8  reserved2                     : 1;
 	u8  is_turnon_lock                : 1;
-	u8  is_lock_event_occur           : 1;
+	u8  is_lockoff_event_occur        : 1;
 	u8  is_return_domain_via_ble      : 1;
 	u8  is_module_excute              : 1;
 	u8  is_module_transmit            : 1;
 }Flag_t;
+
+typedef struct
+{
+	u8  reserved0                     : 1;
+	u8  reserved1                     : 1;
+	u8  reserved2                     : 1;
+	u8  reserved3                     : 1;
+	u8  reserved4                     : 1;
+	u8  reserved5                     : 1;
+	u8  reserved6                     : 1;
+	u8  lock_onoff_state              : 1;
+}device_state_t;
 ///////////////////// RTC 时间相关的 /////////////////////////
 typedef struct{
 	u16 year;

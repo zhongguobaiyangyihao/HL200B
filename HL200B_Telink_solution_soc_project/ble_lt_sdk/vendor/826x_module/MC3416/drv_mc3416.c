@@ -55,7 +55,7 @@ typedef enum
 *******************************************/
 #define 		MC3416_I2C_ADDR   			0x6C//(0xD8>>1)
 u8              is_gsensor_init = 0;
-extern u8       lock_unlock_state;
+extern device_state_t           device_state;
 /*******************************************
 hardware i2c interface init
 *******************************************/
@@ -114,7 +114,7 @@ s8 gsensor_init(void)
     {
     	return err_code;
     }
-    if(lock_unlock_state == lock_unlock_state_lock)//关锁状态下
+    if(device_state.lock_onoff_state == lock_onoff_state_off)//关锁状态下
     {
     	mc3416_register_write(MC34XX_REG_SAMPLE_RATE,0x00); 	    //	SAMPLE_RATE:128hz
     	mc3416_register_write(MC34XX_REG_LPF_RANGE_RES,0x01); 	    //	range:+/-2g
@@ -126,7 +126,7 @@ s8 gsensor_init(void)
     	mc3416_register_write(MC34X6_REG_MOTION_CTRL,0x04);         //  AnyMotion feature is enabled
     	mc3416_register_write(MC34X6_REG_TIMER_CTRL,0xA0);          //  The temporary latch feature is enabled;temporary latch on the TEST_INT pin:800ms
     }
-    else if(lock_unlock_state == lock_unlock_state_unlock)//开锁状态下
+    else if(device_state.lock_onoff_state == lock_onoff_state_on)//开锁状态下
     {
     	mc3416_register_write(MC34XX_REG_SAMPLE_RATE,0x00); 	    //	SAMPLE_RATE:128hz
 		mc3416_register_write(MC34XX_REG_LPF_RANGE_RES,0x31); 	    //	range:+/-16g

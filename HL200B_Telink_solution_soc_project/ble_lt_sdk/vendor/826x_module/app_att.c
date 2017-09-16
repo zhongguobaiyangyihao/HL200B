@@ -68,7 +68,6 @@ extern s16  g_curr_temp;
 extern u16  g_curr_charge_vol;
 extern u8   g_password[6];
 extern u16  g_serial_num;
-extern u8   g_curr_lock_state;
 extern u8   g_curr_status_vib_func;
 extern u8   g_curr_status_vib_status;
 extern u8   g_curr_chg_dischg_state;
@@ -84,6 +83,7 @@ extern u8   g_lock_SN[LOCK_SN_LEN];
 extern u8   g_lock_domains[LOCK_DOMAIN_LEN];
 extern u8   g_is_order_num_unlock;
 extern Flag_t Flag;
+extern device_state_t device_state;
 
 extern void AES_ECB_Encryption(u8 *key, u8 *plaintext, u8 *encrypted_data);
 extern void AES_ECB_Decryption(u8 *key, u8 *encrypted_data, u8 *decrypted_data);
@@ -429,7 +429,7 @@ u8 order_num_lock_notify2master(void){
 		order_num_lock_send1.tokenAck3 = 0x01;
 		//TODO:实际电机控制锁关闭后，需要立即更新全局变量g_curr_lock_state
 		order_num_lock_send1.tl = 7; //TL为时间长度，其中年份占2个字节，其余月日时分秒各一个字节。
-		order_num_lock_send1.RET = g_curr_lock_state;//RET 为状态返回，00 表示关锁成功，01 表示关锁失败
+		order_num_lock_send1.RET = device_state.lock_onoff_state;//RET 为状态返回，00 表示关锁成功，01 表示关锁失败
 		order_num_lock_send1.rtc = GET_RTC_VAL();
 
 		//send cmd1 data
@@ -602,7 +602,7 @@ int sprocomm_lock_write_evt_handler(rf_packet_att_write_t *p)
 				get_lock_work_status_ack->tokenack0 = 0x05;
 				get_lock_work_status_ack->tokenack1 = 0x22;
 				get_lock_work_status_ack->tokenack2 = 0x08;
-				get_lock_work_status_ack->R.R0.lock_switch_status = g_curr_lock_state;
+				get_lock_work_status_ack->R.R0.lock_switch_status = device_state.lock_onoff_state;
 				get_lock_work_status_ack->R.R0.vib_func = g_curr_status_vib_func;
 				get_lock_work_status_ack->R.R0.vib_state = g_curr_status_vib_status;
 				get_lock_work_status_ack->R.R0.chg_dischg_state = g_curr_chg_dischg_state;

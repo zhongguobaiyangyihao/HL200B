@@ -7,7 +7,8 @@
 #include "../app_config.h"
 #include "../../../proj/tl_common.h"
 
-extern Flag_t        Flag;
+extern Flag_t           Flag;
+extern device_state_t   device_state;
 /*******************************************
 Lock 外部中断管脚初始化（关锁）
 *******************************************/
@@ -26,6 +27,15 @@ void Lock_gpio_interrupt_init(void)
 	reg_irq_src = FLD_IRQ_GPIO_RISC1_EN; //clean irq status
 	reg_irq_mask |= FLD_IRQ_GPIO_RISC1_EN;
 	gpio_en_interrupt_risc1(CLOSE_LOCK_CHECK_PIN, 1);
+
+	if(!gpio_read(CLOSE_LOCK_CHECK_PIN))
+	{
+		device_state.lock_onoff_state = lock_onoff_state_off;
+	}
+	else
+	{
+		device_state.lock_onoff_state = lock_onoff_state_on;
+	}
 }
 /*******************************************
 Lock 外部中断处理函数(关锁)
@@ -36,7 +46,7 @@ _attribute_ram_code_ void Lock_gpio_irq_proc(void)
 	if(reg_irq_src & FLD_IRQ_GPIO_RISC1_EN)
 	{
 		reg_irq_src = FLD_IRQ_GPIO_RISC1_EN;
-        Flag.is_lock_event_occur = 1;
+        Flag.is_lockoff_event_occur = 1;
 		printf("Lock interrupt detect.\r\n");
 	}
 }
@@ -66,9 +76,122 @@ static void Lock_motor_stop(void)
 void Lock_turnon_operation(void)
 {
 	u32 start_tick = clock_time();
+	u32 delay_tick;
 	Lock_motor_start();
-	while(!gpio_read(CLOSE_LOCK_CHECK_PIN));
-	while(gpio_read(OPEN_LOCK_CHECK_PIN));
+	while(1)//waiting until CLOSE_LOCK_CHECK_PIN pull high
+	{
+		if(clock_time_exceed(start_tick,5000*1000))
+		{
+			Lock_motor_stop();
+			return;
+		}
+
+		if(!((volatile u32)gpio_read(CLOSE_LOCK_CHECK_PIN)))
+			continue;
+
+		delay_tick = clock_time();
+		while(!clock_time_exceed(delay_tick,20*1000));
+
+		if(!(volatile u32)gpio_read(CLOSE_LOCK_CHECK_PIN))
+			continue;
+		else
+			break;
+	}
+	start_tick = clock_time();
+	while(1)//waiting until OPEN_LOCK_CHECK_PIN pull low
+	{
+		if(clock_time_exceed(start_tick,5000*1000))
+		{
+			Lock_motor_stop();
+			return;
+		}
+
+		if((volatile u32)gpio_read(OPEN_LOCK_CHECK_PIN))
+			continue;
+
+		delay_tick = clock_time();
+		while(!clock_time_exceed(delay_tick,20*1000));
+
+		if((volatile u32)gpio_read(OPEN_LOCK_CHECK_PIN))
+			continue;
+		else
+			break;
+	}
+	start_tick = clock_time();
 	while(!clock_time_exceed(start_tick,20*1000));
 	Lock_motor_stop();
+	device_state.lock_onoff_state = lock_onoff_state_on;
+
+}
+/*******************************************
+关锁操作
+*******************************************/
+void Lock_turnoff_operation(void)
+{
+	u32 start_tick = clock_time();
+	u32 delay_tick;
+	Lock_motor_start();
+	while(1)//waiting until OPEN_LOCK_CHECK_PIN pull high
+	{
+		if(clock_time_exceed(start_tick,5000*1000))
+		{
+			Lock_motor_stop();
+			return;
+		}
+
+		if(!((volatile u32)gpio_read(OPEN_LOCK_CHECK_PIN)))
+			continue;
+
+		delay_tick = clock_time();
+		while(!clock_time_exceed(delay_tick,20*1000));
+
+		if(!((volatile u32)gpio_read(OPEN_LOCK_CHECK_PIN)))
+			continue;
+		else
+			break;
+	}
+	start_tick = clock_time();
+	while(1)//waiting until OPEN_LOCK_CHECK_PIN pull low
+	{
+		if(clock_time_exceed(start_tick,5000*1000))
+		{
+			Lock_motor_stop();
+			return;
+		}
+
+		if((volatile u32)gpio_read(OPEN_LOCK_CHECK_PIN))
+			continue;
+
+		delay_tick = clock_time();
+		while(!clock_time_exceed(delay_tick,20*1000));
+
+		if((volatile u32)gpio_read(OPEN_LOCK_CHECK_PIN))
+			continue;
+		else
+			break;
+	}
+	start_tick = clock_time();
+	while(!clock_time_exceed(start_tick,20*1000));
+	Lock_motor_stop();
+}
+/*
+ * lock_onoff_state_polling
+ */
+void lock_onoff_state_polling(void)
+{
+	u32 start_tick = clock_time();
+    if(Flag.is_lockoff_event_occur)
+	{
+    	Flag.is_lockoff_event_occur = 0;
+    	while(!clock_time_exceed(start_tick,20*1000));
+    	if(!gpio_read(CLOSE_LOCK_CHECK_PIN))
+    	{
+			if(device_state.lock_onoff_state == lock_onoff_state_on)
+			{
+				Lock_turnoff_operation();
+				printf("Lock is switch off!\r\n");
+			}
+			device_state.lock_onoff_state = lock_onoff_state_off;
+    	}
+	}
 }
