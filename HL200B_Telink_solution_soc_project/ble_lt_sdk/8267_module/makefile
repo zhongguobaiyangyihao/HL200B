@@ -17,6 +17,7 @@ RM := rm -rf
 -include vendor/826x_module/Module_Communicate/subdir.mk
 -include vendor/826x_module/MC3416/subdir.mk
 -include vendor/826x_module/Lock/subdir.mk
+-include vendor/826x_module/Charge/subdir.mk
 -include vendor/826x_module/Buzzer/subdir.mk
 -include proj/mcu_spec/subdir.mk
 -include proj/mcu/subdir.mk

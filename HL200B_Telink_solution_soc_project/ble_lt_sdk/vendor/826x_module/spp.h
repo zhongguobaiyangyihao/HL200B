@@ -19,7 +19,7 @@
 #define GET_LOCK_TIME_CMD                   (0x01010506)
 #define GET_INT_EXT_ELECTRICITY_CMD         (0x02010102)
 #define CLOSE_THE_LOCK_CMD                  (0x01010c05)
-#define GET_LOCK_STATUS_CMD                 (0x01010e05) //Query lock status
+#define GET_LOCK_STATUS_CMD                 (0x0e05)     //Query lock status
 #define SET_RETURN_CAR_CONDITION_CMD        (0x01011405) //set return car condition
 #define GET_LOCK_WORK_PATTERN_CMD           (0x2005)     //Query lock work pattern
 #define GET_LOCK_WORKING_STATUS_CMD         (0x2205)     //Inquire about the working state of the lock
@@ -37,8 +37,8 @@
 #define OPEN_THE_LOCK_CMD                   (0x0105)
 #define SERIAL_NUM_LOCK_CMD                 (0x083105)
 #define ORDER_NUM_UNLOCK_CMD                (0x061105)
-#define CHANGE_PASSWORD_CMD1                (0x060305) //change password1
-#define CHANGE_PASSWORD_CMD2                (0x060405) //change password2
+#define CHANGE_PASSWORD_CMD1                (0x0305) //change password1
+#define CHANGE_PASSWORD_CMD2                (0x0405) //change password2
 #define MODIFY_KEY_CMD1                     (0x080107) //Modify key1
 #define MODIFY_KEY_CMD2                     (0x080207) //Modify key2
 #define SET_LOCK_WORK_PATTERN_CMD           (0x012105) //set lock mode of operation

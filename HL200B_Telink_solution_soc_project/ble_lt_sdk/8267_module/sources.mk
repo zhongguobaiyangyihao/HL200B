@@ -24,6 +24,7 @@ vendor/826x_module/da213 \
 vendor/826x_module/Module_Communicate \
 vendor/826x_module/MC3416 \
 vendor/826x_module/Lock \
+vendor/826x_module/Charge \
 vendor/826x_module/Buzzer \
 proj/mcu_spec \
 proj/mcu \
