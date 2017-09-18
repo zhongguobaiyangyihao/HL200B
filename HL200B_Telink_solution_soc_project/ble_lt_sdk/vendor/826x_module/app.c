@@ -39,6 +39,7 @@ int		module_task_busy;
 /////////////////////////////// AES-ECB concerned ///////////////////////////////////////////
 u32 	g_token;//Token
 u8      g_private_AES_key[16] 	= { 0x20, 0x57, 0x2F, 0x52, 0x36, 0x4B, 0x3F, 0x47, 0x30, 0x50, 0x41, 0x58, 0x11, 0x63, 0x2D, 0x2B};//Key fixing
+//u8      g_private_lockon_key[6] = {1, 2, 3, 4, 5, 6};
 u8      g_private_lockon_key[6] = {0x30, 0x30, 0x30, 0x30, 0x30, 0x30};
 device_state_t           device_state;
 nv_params_t              *nv_params_ptr;
@@ -73,6 +74,8 @@ extern void ble_return_lock_on_result(u8 result);
 extern nv_params_storage(nv_params_t *nv_params_ptr);
 extern void buzzer_schedule_handler(void);
 extern void buzzer_turnon_lock_indicate(void);
+extern nv_params_t *ble_update_nv_params_ptr_inquiry(void);
+extern void ble_return_lockon_password_update_result(u8 result);
 /**************************************************************************/
 /////////////////////////////// HemiaoLock concerned ///////////////////////////////////////////
 u32 g_current_time;
@@ -489,31 +492,23 @@ static void user_flash_init(void)
 		printf("0x%x ",nv_params_ptr->AES_Key[i]);
 	}
 	printf("\r\n");
-	if((nv_params_ptr->AES_Key[0] != 0xFF)||(nv_params_ptr->AES_Key[1] != 0xFF)||
-	   (nv_params_ptr->AES_Key[2] != 0xFF)||(nv_params_ptr->AES_Key[3] != 0xFF)||
-	   (nv_params_ptr->AES_Key[4] != 0xFF)||(nv_params_ptr->AES_Key[5] != 0xFF)||
-	   (nv_params_ptr->AES_Key[6] != 0xFF)||(nv_params_ptr->AES_Key[7] != 0xFF)||
-	   (nv_params_ptr->AES_Key[8] != 0xFF)||(nv_params_ptr->AES_Key[9] != 0xFF)||
-	   (nv_params_ptr->AES_Key[10] != 0xFF)||(nv_params_ptr->AES_Key[11] != 0xFF)||
-	   (nv_params_ptr->AES_Key[12] != 0xFF)||(nv_params_ptr->AES_Key[13] != 0xFF)||
-	   (nv_params_ptr->AES_Key[14] != 0xFF)||(nv_params_ptr->AES_Key[15] != 0xFF)
+	if((nv_params_ptr->AES_Key[0] == 0xFF)&&(nv_params_ptr->AES_Key[1] == 0xFF)&&
+	   (nv_params_ptr->AES_Key[2] == 0xFF)&&(nv_params_ptr->AES_Key[3] == 0xFF)&&
+	   (nv_params_ptr->AES_Key[4] == 0xFF)&&(nv_params_ptr->AES_Key[5] == 0xFF)&&
+	   (nv_params_ptr->AES_Key[6] == 0xFF)&&(nv_params_ptr->AES_Key[7] == 0xFF)&&
+	   (nv_params_ptr->AES_Key[8] == 0xFF)&&(nv_params_ptr->AES_Key[9] == 0xFF)&&
+	   (nv_params_ptr->AES_Key[10] == 0xFF)&&(nv_params_ptr->AES_Key[11] == 0xFF)&&
+	   (nv_params_ptr->AES_Key[12] == 0xFF)&&(nv_params_ptr->AES_Key[13] == 0xFF)&&
+	   (nv_params_ptr->AES_Key[14] == 0xFF)&&(nv_params_ptr->AES_Key[15] == 0xFF)
 	  )
-	{
-		memcpy(g_private_AES_key,nv_params_ptr->AES_Key,16);
-	}
-	else
 	{
 		is_need_storage = 1;
 		memcpy(nv_params.AES_Key,g_private_AES_key,16);
 	}
-	if((nv_params_ptr->AES_Key[0] != 0xFF)||(nv_params_ptr->AES_Key[1] != 0xFF)||
-	   (nv_params_ptr->AES_Key[2] != 0xFF)||(nv_params_ptr->AES_Key[3] != 0xFF)||
-	   (nv_params_ptr->AES_Key[4] != 0xFF)||(nv_params_ptr->AES_Key[5] != 0xFF)
+	if((nv_params_ptr->AES_Key[0] == 0xFF)&&(nv_params_ptr->AES_Key[1] == 0xFF)&&
+	   (nv_params_ptr->AES_Key[2] == 0xFF)&&(nv_params_ptr->AES_Key[3] == 0xFF)&&
+	   (nv_params_ptr->AES_Key[4] == 0xFF)&&(nv_params_ptr->AES_Key[5] == 0xFF)
       )
-	{
-		memcpy(g_private_lockon_key,nv_params_ptr->lock_on_pwd,6);
-	}
-	else
 	{
 		is_need_storage = 1;
 		memcpy(nv_params.lock_on_pwd,g_private_lockon_key,6);
@@ -525,6 +520,17 @@ static void user_flash_init(void)
 		printf("Flash storage result:%d.\r\n",err_code);
 	}
 #endif
+}
+/*
+ * user_update_nv_params
+ */
+static u8 user_update_nv_params(nv_params_t *tmp_nv_params_ptr)
+{
+	u8 err_code;
+	err_code = nv_params_storage(tmp_nv_params_ptr);
+	printf("user_update_nv_params is %d.\r\n",err_code);
+	printf("nv data: \r\n");foreach(i, sizeof(nv_params_t)){PrintHex(*((u8*)nv_params_ptr+i));}printf("\r\n");
+	return err_code;
 }
 /*
  * uart_init
@@ -694,6 +700,7 @@ void main_loop()
 {
 	static u32 tick_loop;
 	u8         lock_on_result;
+	u8         err_code;
 	tick_loop ++;
 	////////////////////////////////////// BLE entry /////////////////////////////////
 	blt_sdk_main_loop();
@@ -721,6 +728,15 @@ void main_loop()
         ble_return_lock_on_result(lock_on_result);
         if(!lock_on_result)
         	buzzer_turnon_lock_indicate();
+    }
+    if(Flag.is_lockon_password_update)
+    {
+    	Flag.is_lockon_password_update = 0;
+    	err_code = user_update_nv_params(ble_update_nv_params_ptr_inquiry());
+    	if(err_code == 0)
+    		ble_return_lockon_password_update_result(0);
+    	else
+    		ble_return_lockon_password_update_result(1);
     }
 }
 

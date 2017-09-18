@@ -54,7 +54,7 @@ typedef struct
 {
 	u8  reserved0                     : 1;
 	u8  reserved1                     : 1;
-	u8  reserved2                     : 1;
+	u8  is_lockon_password_update     : 1;
 	u8  is_turnon_lock_via_ble        : 1;
 	u8  is_lockoff_event_occur        : 1;
 	u8  is_return_domain_via_ble      : 1;

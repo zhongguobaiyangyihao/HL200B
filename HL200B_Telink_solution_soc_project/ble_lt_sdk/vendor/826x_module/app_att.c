@@ -53,6 +53,7 @@ u16 		serviceChangeVal[2] = {0};
 static u8 	indCharCfg[6] = {0x0b, 0x00, 0x02, 0x29};
 const u16 	userdesc_UUID		= GATT_UUID_CHAR_USER_DESC;
 
+static nv_params_t  ble_nv_params;;
 
 #define 	DEV_NAME                       			"TNLKLock"
 extern u8  	ble_devName[];
@@ -60,7 +61,6 @@ extern u8  	ble_devName[];
 
 ///////////////////// HemiaoLock /////////////////////////////////////////////
 extern u32 	g_token;//Token
-extern u8 	g_private_AES_key[16];
 extern u32  g_current_time;
 extern u16  g_serialNum;
 extern u32  g_locked_time;
@@ -433,7 +433,7 @@ u8 order_num_lock_notify2master(void){
 		order_num_lock_send1.rtc = GET_RTC_VAL();
 
 		//send cmd1 data
-		AES_ECB_Encryption(g_private_AES_key, (u8*)&order_num_lock_send1, encrypted_data);
+		AES_ECB_Encryption(nv_params_ptr->AES_Key, (u8*)&order_num_lock_send1, encrypted_data);
 		bls_att_pushNotifyData(BleLockChar2DataHdl, encrypted_data, 16);
 
 		//send left data
@@ -450,7 +450,7 @@ u8 order_num_lock_notify2master(void){
 			memset(order_num_lock_send2.order, 0, 12);
 			order_num_lock_send2.CI = send_cnt;
 			memcpy(order_num_lock_send2.order, order+(send_cnt*12), tmp_order_len > 12 ? 12 : tmp_order_len);
-			AES_ECB_Encryption(g_private_AES_key, (u8*)&order_num_lock_send1, encrypted_data);
+			AES_ECB_Encryption(nv_params_ptr->AES_Key, (u8*)&order_num_lock_send1, encrypted_data);
 			bls_att_pushNotifyData(BleLockChar2DataHdl, encrypted_data, 16);
 			send_cnt++;
 		}while((--notify_cnt) > 0);
@@ -459,7 +459,7 @@ u8 order_num_lock_notify2master(void){
 			memset(order_num_lock_send2.order, 0, 12);
 			order_num_lock_send2.CI = send_cnt;
 			memcpy(order_num_lock_send2.order, order+(send_cnt*12), left_notify_cnt);
-			AES_ECB_Encryption(g_private_AES_key, (u8*)&order_num_lock_send2, encrypted_data);
+			AES_ECB_Encryption(nv_params_ptr->AES_Key, (u8*)&order_num_lock_send2, encrypted_data);
 			bls_att_pushNotifyData(BleLockChar2DataHdl, encrypted_data, 16);
 		}
 		return 1;
@@ -475,6 +475,36 @@ int hemiaolock_read(void * p)
 	return 0;
 }
 /************************************************************
+ble_update_nv_params_ptr_inquiry
+************************************************************/
+nv_params_t *ble_update_nv_params_ptr_inquiry(void)
+{
+	return (&ble_nv_params);
+}
+/************************************************************
+ble_update_lockon_password
+************************************************************/
+static void ble_update_lockon_password(void)
+{
+	Flag.is_lockon_password_update = 1;
+}
+/************************************************************
+ble_return_lock_on_result
+************************************************************/
+void ble_return_lockon_password_update_result(u8 result)
+{
+	u8 tmp_buffer[20];
+	u8 encrypted_data[16];//S->M encryption
+	modify_pwd_ack_t* modify_pwd_ack = (modify_pwd_ack_t*)tmp_buffer;
+	modify_pwd_ack->tokenack0 = 0x05;
+	modify_pwd_ack->tokenack1 = 0x05;
+	modify_pwd_ack->tokenack2 = 0x01;
+	modify_pwd_ack->RET = result;//RET 为状态返回，00 表示修改密码成功，01 表示修改密码失败。
+	printf("rsponse data: ");foreach(i, 16){PrintHex(*((u8*)modify_pwd_ack+i));}printf("\r\n");
+	AES_ECB_Encryption(nv_params_ptr->AES_Key, (u8*)modify_pwd_ack, encrypted_data);
+	bls_att_pushNotifyData(BleLockChar2DataHdl, encrypted_data, 16);
+}
+/************************************************************
 ble_return_lock_on_result
 ************************************************************/
 void ble_return_lock_on_result(u8 result)
@@ -488,8 +518,8 @@ void ble_return_lock_on_result(u8 result)
 	open_lock_ack->RET = result;//RET 为状态返回，00 表示开锁成功，01 表示开锁失败。
 	open_lock_ack->tl = 7;//TL为时间长度，其中年份占2个字节，其余月日时分秒各一个字节
 	open_lock_ack->rtc = BJ_Time;
-
-	AES_ECB_Encryption(g_private_AES_key, (u8*)open_lock_ack, encrypted_data);
+	printf("rsponse data: ");foreach(i, 16){PrintHex(*((u8*)open_lock_ack+i));}printf("\r\n");
+	AES_ECB_Encryption(nv_params_ptr->AES_Key, (u8*)open_lock_ack, encrypted_data);
 	bls_att_pushNotifyData(BleLockChar2DataHdl, encrypted_data, 16);
 }
 /************************************************************
@@ -517,7 +547,7 @@ void ble_return_domain_operation(void)
 		get_lock_domains_ack->CI = current_index;
 		memcpy(get_lock_domains_ack->DOMAIN, current_transmiting, 12);
 		printf("rsponse data: ");foreach(i, 16){PrintHex(*((u8*)get_lock_domains_ack+i));}printf("\r\n");
-		AES_ECB_Encryption(g_private_AES_key, (u8*)get_lock_domains_ack, encrypted_data);
+		AES_ECB_Encryption(nv_params_ptr->AES_Key, (u8*)get_lock_domains_ack, encrypted_data);
 		bls_att_pushNotifyData(BleLockChar2DataHdl, encrypted_data, 16);
 		if(current_index != (total_index-1))
 		{
@@ -552,10 +582,11 @@ int sprocomm_lock_write_evt_handler(rf_packet_att_write_t *p)
 	static u8 continue_cmd_flg;
 	static u8 order_transmit_seq;
 	static u8 cnt;
+	static u8 old_password_check_reslult_fail = 1;//check fail
 	if(len == 16)
 	{   //HemiaoLock data length id fixed as 16 bytes
 
-		AES_ECB_Decryption(g_private_AES_key, &p->value, decrypted_data);
+		AES_ECB_Decryption(nv_params_ptr->AES_Key, &p->value, decrypted_data);
 
 		memcpy((u8*)&cmdOpCode, decrypted_data, sizeof(u16));
 		memset((void*)p, 0, sizeof(rf_packet_att_write_t));
@@ -564,6 +595,9 @@ int sprocomm_lock_write_evt_handler(rf_packet_att_write_t *p)
 		{
 		    case GET_LOCK_TOKEN_CMD://0x06 0x01
 			{
+				//new connect init params
+				old_password_check_reslult_fail = 1;
+
 				printf("GET_LOCK_TOKEN_CMD.\r\n");
 				token_packet_ack_t* token_ack = (token_packet_ack_t*)p;
 				token_ack->tokenack0 = 0x06;
@@ -576,7 +610,7 @@ int sprocomm_lock_write_evt_handler(rf_packet_att_write_t *p)
 				token_ack->productID_IDL = IDL;
 				token_ack->productID_IDH = IDH;
 				printf("rsponse data: ");foreach(i, 16){PrintHex(*((u8*)token_ack+i));}printf("\r\n");
-				AES_ECB_Encryption(g_private_AES_key, (u8*)token_ack, encrypted_data);
+				AES_ECB_Encryption(nv_params_ptr->AES_Key, (u8*)token_ack, encrypted_data);
 				bls_att_pushNotifyData(BleLockChar2DataHdl, encrypted_data, 16);
 				break;
 			}
@@ -593,7 +627,7 @@ int sprocomm_lock_write_evt_handler(rf_packet_att_write_t *p)
 				get_GSM_ID_ack->tokenack2 = 0x06;
 				memcpy(get_GSM_ID_ack->GSM_ID, g_GSM_ID, 6);
 				printf("rsponse data: ");foreach(i, 16){PrintHex(*((u8*)get_GSM_ID_ack+i));}printf("\r\n");
-				AES_ECB_Encryption(g_private_AES_key, (u8*)get_GSM_ID_ack, encrypted_data);
+				AES_ECB_Encryption(nv_params_ptr->AES_Key, (u8*)get_GSM_ID_ack, encrypted_data);
 				bls_att_pushNotifyData(BleLockChar2DataHdl, encrypted_data, 16);
 		    	break;
 		    }
@@ -610,7 +644,7 @@ int sprocomm_lock_write_evt_handler(rf_packet_att_write_t *p)
 				get_lock_work_pattern_ack->tokenack2 = 0x01;
 				get_lock_work_pattern_ack->MOD = g_curr_lock_work_pattern;//MOD 为锁工作模式，00 表示正常模式，01 表示运输模式
 				printf("rsponse data: ");foreach(i, 16){PrintHex(*((u8*)get_lock_work_pattern_ack+i));}printf("\r\n");
-				AES_ECB_Encryption(g_private_AES_key, (u8*)get_lock_work_pattern_ack, encrypted_data);
+				AES_ECB_Encryption(nv_params_ptr->AES_Key, (u8*)get_lock_work_pattern_ack, encrypted_data);
 				bls_att_pushNotifyData(BleLockChar2DataHdl, encrypted_data, 16);
 		    	break;
 		    }
@@ -640,7 +674,7 @@ int sprocomm_lock_write_evt_handler(rf_packet_att_write_t *p)
 				get_lock_work_status_ack->tl = 2;//温度值temp的长度,这里默认2
 				get_lock_work_status_ack->temp = g_curr_temp;
 				printf("rsponse data: ");foreach(i, 16){PrintHex(*((u8*)get_lock_work_status_ack+i));}printf("\r\n");
-				AES_ECB_Encryption(g_private_AES_key, (u8*)get_lock_work_status_ack, encrypted_data);
+				AES_ECB_Encryption(nv_params_ptr->AES_Key, (u8*)get_lock_work_status_ack, encrypted_data);
 				bls_att_pushNotifyData(BleLockChar2DataHdl, encrypted_data, 16);
 		    	break;
 		    }
@@ -658,7 +692,7 @@ int sprocomm_lock_write_evt_handler(rf_packet_att_write_t *p)
 				get_GSM_VER_ack->N = GSM_VER_LEN;
 				memcpy(get_GSM_VER_ack->ver, g_GSM_ver, GSM_VER_LEN);
 				printf("rsponse data: ");foreach(i, 16){PrintHex(*((u8*)get_GSM_VER_ack+i));}printf("\r\n");
-				AES_ECB_Encryption(g_private_AES_key, (u8*)get_GSM_VER_ack, encrypted_data);
+				AES_ECB_Encryption(nv_params_ptr->AES_Key, (u8*)get_GSM_VER_ack, encrypted_data);
 				bls_att_pushNotifyData(BleLockChar2DataHdl, encrypted_data, 16);
 				break;
 		    }
@@ -675,7 +709,7 @@ int sprocomm_lock_write_evt_handler(rf_packet_att_write_t *p)
 				get_ICCID_ack->L = LOCK_ICCID_LEN;
 				memcpy(get_ICCID_ack->iccid, g_lock_ICCID, LOCK_ICCID_LEN);
 				printf("rsponse data: ");foreach(i, 16){PrintHex(*((u8*)get_ICCID_ack+i));}printf("\r\n");
-				AES_ECB_Encryption(g_private_AES_key, (u8*)get_ICCID_ack, encrypted_data);
+				AES_ECB_Encryption(nv_params_ptr->AES_Key, (u8*)get_ICCID_ack, encrypted_data);
 				bls_att_pushNotifyData(BleLockChar2DataHdl, encrypted_data, 16);
 		    	break;
 		    }
@@ -692,7 +726,7 @@ int sprocomm_lock_write_evt_handler(rf_packet_att_write_t *p)
 				get_IMEI_ack->L = LOCK_IMEI_LEN;
 				memcpy(get_IMEI_ack->imei, g_lock_IMEI, LOCK_IMEI_LEN);
 				printf("rsponse data: ");foreach(i, 16){PrintHex(*((u8*)get_IMEI_ack+i));}printf("\r\n");
-				AES_ECB_Encryption(g_private_AES_key, (u8*)get_IMEI_ack, encrypted_data);
+				AES_ECB_Encryption(nv_params_ptr->AES_Key, (u8*)get_IMEI_ack, encrypted_data);
 				bls_att_pushNotifyData(BleLockChar2DataHdl, encrypted_data, 16);
 				break;
 			}
@@ -709,7 +743,7 @@ int sprocomm_lock_write_evt_handler(rf_packet_att_write_t *p)
 				get_SN_ack->L = LOCK_SN_LEN;
 				memcpy(get_SN_ack->SN, g_lock_SN, LOCK_SN_LEN);
 				printf("rsponse data: ");foreach(i, 16){PrintHex(*((u8*)get_SN_ack+i));}printf("\r\n");
-				AES_ECB_Encryption(g_private_AES_key, (u8*)get_SN_ack, encrypted_data);
+				AES_ECB_Encryption(nv_params_ptr->AES_Key, (u8*)get_SN_ack, encrypted_data);
 				bls_att_pushNotifyData(BleLockChar2DataHdl, encrypted_data, 16);
 				break;
 			}
@@ -773,7 +807,8 @@ int sprocomm_lock_write_evt_handler(rf_packet_att_write_t *p)
 				sync_time_ack->tokenack1 = 0x04;
 				sync_time_ack->tokenack2 = 0x01;
 				sync_time_ack->ret = 0x00;
-				AES_ECB_Encryption(g_private_AES_key, (u8*)sync_time_ack, encrypted_data);
+				printf("rsponse data: ");foreach(i, 16){PrintHex(*((u8*)sync_time_ack+i));}printf("\r\n");
+				AES_ECB_Encryption(nv_params_ptr->AES_Key, (u8*)sync_time_ack, encrypted_data);
 				bls_att_pushNotifyData(BleLockChar2DataHdl, encrypted_data, 16);
 				break;
 			}
@@ -783,49 +818,70 @@ int sprocomm_lock_write_evt_handler(rf_packet_att_write_t *p)
 				{
 					break;
 				}
-				printf("GET_LOCK_STATUS_CMD.\n");
+				printf("GET_LOCK_STATUS_CMD.\r\n");
 				query_lock_status_ack_t* query_lock_status_ack = (query_lock_status_ack_t*)p;
 				query_lock_status_ack->tokenack0 = 0x05;
 				query_lock_status_ack->tokenack1 = 0x0f;
 				query_lock_status_ack->tokenack2 = 0x01;
 				query_lock_status_ack->sta = device_state.lock_onoff_state;//STA 为锁状态，00 表示开启状态，01 表示关闭状态。
-				AES_ECB_Encryption(g_private_AES_key, (u8*)query_lock_status_ack, encrypted_data);
+				printf("rsponse data: ");foreach(i, 16){PrintHex(*((u8*)query_lock_status_ack+i));}printf("\r\n");
+				AES_ECB_Encryption(nv_params_ptr->AES_Key, (u8*)query_lock_status_ack, encrypted_data);
 				bls_att_pushNotifyData(BleLockChar2DataHdl, encrypted_data, 16);
 				break;
 			}
-#if 0
 		    case CHANGE_PASSWORD_CMD1://0x05 03
 			{
-				printf("CHANGE_PASSWORD_CMD1.\n");
-
-				//u32 get_token =  MAKE_U32(decrypted_data[12], decrypted_data[11], decrypted_data[10], decrypted_data[9]);
-				memcpy(g_old_password, decrypted_data+3, 6);//OLDPWD 为旧密码，NEWPWD 为新密码。
-				//if(g_session_id == get_token){//?
-				//	chg_pwd_cmd1 = 1;
-				//}
+				if(!gap_check_token_is_met(decrypted_data+9))
+				{
+					break;
+				}
+				printf("CHANGE_PASSWORD_CMD1.\r\n");
+				if(
+					(nv_params_ptr->lock_on_pwd[0] != *((u8 *)(decrypted_data+3)))||
+					(nv_params_ptr->lock_on_pwd[1] != *((u8 *)(decrypted_data+4)))||
+					(nv_params_ptr->lock_on_pwd[2] != *((u8 *)(decrypted_data+5)))||
+					(nv_params_ptr->lock_on_pwd[3] != *((u8 *)(decrypted_data+6)))||
+					(nv_params_ptr->lock_on_pwd[4] != *((u8 *)(decrypted_data+7)))||
+					(nv_params_ptr->lock_on_pwd[5] != *((u8 *)(decrypted_data+8)))
+				  )
+				{
+					printf("old password check fail.\r\n");
+					old_password_check_reslult_fail = 1;
+				}
+				else
+				{
+					printf("old password check success.\r\n");
+					old_password_check_reslult_fail = 0;
+				}
 				break;
 			}
 			case CHANGE_PASSWORD_CMD2://0x05 04
 			{
-				printf("CHANGE_PASSWORD_CMD2.\n");
-
-				//u32 get_token =  MAKE_U32(decrypted_data[12], decrypted_data[11], decrypted_data[10], decrypted_data[9]);
-				memcpy(g_new_password, decrypted_data+3, 6);//OLDPWD 为旧密码，NEWPWD 为新密码。
-				//if(g_session_id == get_token){//?
-				//	if(chg_pwd_cmd1 == 1){
-				//        chg_pwd_cmd1 = 0;
-						modify_pwd_ack_t* modify_pwd_ack = (modify_pwd_ack_t*)p;
-						modify_pwd_ack->tokenack0 = 0x05;
-						modify_pwd_ack->tokenack1 = 0x05;
-						modify_pwd_ack->tokenack2 = 0x01;
-						modify_pwd_ack->RET = 0x00;//RET 为状态返回，00 表示修改密码成功，01 表示修改密码失败。
-						AES_ECB_Encryption(g_private_AES_key, (u8*)modify_pwd_ack, encrypted_data);
-						bls_att_pushNotifyData(BleLockChar2DataHdl, encrypted_data, 16);
-				//  }
-				//}
-						break;
+				if(!gap_check_token_is_met(decrypted_data+9))
+				{
+					break;
+				}
+				printf("CHANGE_PASSWORD_CMD2.\r\n");
+				if(old_password_check_reslult_fail)
+				{
+					printf("old password check fail.\r\n");
+					modify_pwd_ack_t* modify_pwd_ack = (modify_pwd_ack_t*)p;
+					modify_pwd_ack->tokenack0 = 0x05;
+					modify_pwd_ack->tokenack1 = 0x05;
+					modify_pwd_ack->tokenack2 = 0x01;
+					modify_pwd_ack->RET = 0x01;//RET 为状态返回，00 表示修改密码成功，01 表示修改密码失败。
+					printf("rsponse data: ");foreach(i, 16){PrintHex(*((u8*)modify_pwd_ack+i));}printf("\r\n");
+					AES_ECB_Encryption(nv_params_ptr->AES_Key, (u8*)modify_pwd_ack, encrypted_data);
+					bls_att_pushNotifyData(BleLockChar2DataHdl, encrypted_data, 16);
+				}
+				else
+				{
+					memcpy(&ble_nv_params,nv_params_ptr,sizeof(nv_params_t));
+					memcpy(ble_nv_params.lock_on_pwd,(decrypted_data+3),sizeof(ble_nv_params.lock_on_pwd));
+					ble_update_lockon_password();
+				}
+				break;
 			}
-#endif
 			default:
 			{
 				break;
@@ -852,7 +908,7 @@ int sprocomm_lock_write_evt_handler(rf_packet_att_write_t *p)
 				token_ack->productID_IDL = IDL;
 				token_ack->productID_IDH = IDH;
 				printf("|    rsponse data: ");foreach(i, 16){PrintHex(*((u8*)token_ack+i));}printf("|\n");
-				AES_ECB_Encryption(g_private_AES_key, (u8*)token_ack, encrypted_data);
+				AES_ECB_Encryption(nv_params_ptr->AES_Key, (u8*)token_ack, encrypted_data);
 				bls_att_pushNotifyData(BleLockChar2DataHdl, encrypted_data, 16);
 				break;
 			}
@@ -869,7 +925,7 @@ int sprocomm_lock_write_evt_handler(rf_packet_att_write_t *p)
 					query_lock_time_ack->serialNum = g_serialNum;
 					query_lock_time_ack->lastLockTime = g_locked_time;
 
-					AES_ECB_Encryption(g_private_AES_key, (u8*)query_lock_time_ack, encrypted_data);
+					AES_ECB_Encryption(nv_params_ptr->AES_Key, (u8*)query_lock_time_ack, encrypted_data);
 					bls_att_pushNotifyData(BleLockChar2DataHdl, encrypted_data, 16);
 				//}
 			}
@@ -892,7 +948,7 @@ int sprocomm_lock_write_evt_handler(rf_packet_att_write_t *p)
 					get_int_ext_electricity_ack->temp = g_curr_temp;
 					get_int_ext_electricity_ack->cl = 2;//充电电压charge的长度,这里默认2
 					get_int_ext_electricity_ack->charge = g_curr_charge_vol;
-					AES_ECB_Encryption(g_private_AES_key, (u8*)get_int_ext_electricity_ack, encrypted_data);
+					AES_ECB_Encryption(nv_params_ptr->AES_Key, (u8*)get_int_ext_electricity_ack, encrypted_data);
 					bls_att_pushNotifyData(BleLockChar2DataHdl, encrypted_data, 16);
 				//}
 			}
@@ -910,7 +966,7 @@ int sprocomm_lock_write_evt_handler(rf_packet_att_write_t *p)
 					query_lock_status_ack->tokenack1 = 0x0f;
 					query_lock_status_ack->tokenack2 = 0x01;
 					query_lock_status_ack->sta = g_curr_lock_state;//STA 为锁状态，00 表示开启状态，01 表示关闭状态。
-					AES_ECB_Encryption(g_private_AES_key, (u8*)query_lock_status_ack, encrypted_data);
+					AES_ECB_Encryption(nv_params_ptr->AES_Key, (u8*)query_lock_status_ack, encrypted_data);
 					bls_att_pushNotifyData(BleLockChar2DataHdl, encrypted_data, 16);
 				//}
 			}
@@ -928,7 +984,7 @@ int sprocomm_lock_write_evt_handler(rf_packet_att_write_t *p)
 					set_return_car_status_ack->tokenack1 = 0x15;
 					set_return_car_status_ack->tokenack2 = 0x01;
 					set_return_car_status_ack->RET = 0x00;//RET 为状态返回，00 表示设置成功，01 表示设置失败
-					AES_ECB_Encryption(g_private_AES_key, (u8*)set_return_car_status_ack, encrypted_data);
+					AES_ECB_Encryption(nv_params_ptr->AES_Key, (u8*)set_return_car_status_ack, encrypted_data);
 					bls_att_pushNotifyData(BleLockChar2DataHdl, encrypted_data, 16);
 				//}
 			}
@@ -946,7 +1002,7 @@ int sprocomm_lock_write_evt_handler(rf_packet_att_write_t *p)
 					get_lock_work_pattern_ack->tokenack1 = 0x20;
 					get_lock_work_pattern_ack->tokenack2 = 0x01;
 					get_lock_work_pattern_ack->MOD = g_curr_lock_work_pattern;//MOD 为锁工作模式，00 表示正常模式，01 表示运输模式
-					AES_ECB_Encryption(g_private_AES_key, (u8*)get_lock_work_pattern_ack, encrypted_data);
+					AES_ECB_Encryption(nv_params_ptr->AES_Key, (u8*)get_lock_work_pattern_ack, encrypted_data);
 					bls_att_pushNotifyData(BleLockChar2DataHdl, encrypted_data, 16);
 				//}
 			}
@@ -977,7 +1033,7 @@ int sprocomm_lock_write_evt_handler(rf_packet_att_write_t *p)
 					get_lock_work_status_ack->volt = g_curr_vol;
 					get_lock_work_status_ack->tl = 2;//温度值temp的长度,这里默认2
 					get_lock_work_status_ack->temp = g_curr_temp;
-					AES_ECB_Encryption(g_private_AES_key, (u8*)get_lock_work_status_ack, encrypted_data);
+					AES_ECB_Encryption(nv_params_ptr->AES_Key, (u8*)get_lock_work_status_ack, encrypted_data);
 					bls_att_pushNotifyData(BleLockChar2DataHdl, encrypted_data, 16);
 				//}
 			}
@@ -995,7 +1051,7 @@ int sprocomm_lock_write_evt_handler(rf_packet_att_write_t *p)
 					get_GSM_ID_ack->tokenack1 = 0x23;
 					get_GSM_ID_ack->tokenack2 = 0x06;
 					memcpy(get_GSM_ID_ack->GSM_ID, g_GSM_ID, 6);
-					AES_ECB_Encryption(g_private_AES_key, (u8*)get_GSM_ID_ack, encrypted_data);
+					AES_ECB_Encryption(nv_params_ptr->AES_Key, (u8*)get_GSM_ID_ack, encrypted_data);
 					bls_att_pushNotifyData(BleLockChar2DataHdl, encrypted_data, 16);
 				//}
 			}
@@ -1014,7 +1070,7 @@ int sprocomm_lock_write_evt_handler(rf_packet_att_write_t *p)
 					get_GSM_VER_ack->tokenack2 = 0x01;
 					get_GSM_VER_ack->N = GSM_VER_LEN;
 					memcpy(get_GSM_VER_ack->ver, g_GSM_ver, GSM_VER_LEN);
-					AES_ECB_Encryption(g_private_AES_key, (u8*)get_GSM_VER_ack, encrypted_data);
+					AES_ECB_Encryption(nv_params_ptr->AES_Key, (u8*)get_GSM_VER_ack, encrypted_data);
 					bls_att_pushNotifyData(BleLockChar2DataHdl, encrypted_data, 16);
 				//}
 			}
@@ -1032,7 +1088,7 @@ int sprocomm_lock_write_evt_handler(rf_packet_att_write_t *p)
 				    get_lock_domains_ack->tokenack1 = 0x30;
 				    get_lock_domains_ack->T = LOCK_DOMAIN_LEN;
 				    memcpy(get_lock_domains_ack->DOMAIN, g_lock_domains, LOCK_DOMAIN_LEN);
-					AES_ECB_Encryption(g_private_AES_key, (u8*)get_lock_domains_ack, encrypted_data);
+					AES_ECB_Encryption(nv_params_ptr->AES_Key, (u8*)get_lock_domains_ack, encrypted_data);
 					bls_att_pushNotifyData(BleLockChar2DataHdl, encrypted_data, 16);
 				//}
 			}
@@ -1083,7 +1139,7 @@ int sprocomm_lock_write_evt_handler(rf_packet_att_write_t *p)
 				//else{
 				//	sync_time_ack->ret = 0x01;
 				//}
-				AES_ECB_Encryption(g_private_AES_key, (u8*)sync_time_ack, encrypted_data);
+				AES_ECB_Encryption(nv_params_ptr->AES_Key, (u8*)sync_time_ack, encrypted_data);
 				bls_att_pushNotifyData(BleLockChar2DataHdl, encrypted_data, 16);
 			}
 			break;
@@ -1104,7 +1160,7 @@ int sprocomm_lock_write_evt_handler(rf_packet_att_write_t *p)
 					get_vol_temp_ack->tl = 2;//温度值temp的长度,这里默认2
 					get_vol_temp_ack->temp = g_curr_temp;
 
-					AES_ECB_Encryption(g_private_AES_key, (u8*)get_vol_temp_ack, encrypted_data);
+					AES_ECB_Encryption(nv_params_ptr->AES_Key, (u8*)get_vol_temp_ack, encrypted_data);
 					bls_att_pushNotifyData(BleLockChar2DataHdl, encrypted_data, 16);
 				//}
 			}
@@ -1125,7 +1181,7 @@ int sprocomm_lock_write_evt_handler(rf_packet_att_write_t *p)
 					open_lock_ack->tl = 7;//TL为时间长度，其中年份占2个字节，其余月日时分秒各一个字节
 					open_lock_ack->rtc = GET_RTC_VAL();
 
-					AES_ECB_Encryption(g_private_AES_key, (u8*)open_lock_ack, encrypted_data);
+					AES_ECB_Encryption(nv_params_ptr->AES_Key, (u8*)open_lock_ack, encrypted_data);
 					bls_att_pushNotifyData(BleLockChar2DataHdl, encrypted_data, 16);
 				//}
 			}
@@ -1146,7 +1202,7 @@ int sprocomm_lock_write_evt_handler(rf_packet_att_write_t *p)
 					//TODO: 获取开锁成功or失败的信息
 					serial_number_lock_ack->RET = g_curr_lock_state;//RET 为状态返回，00 表示开锁成功，01 表示开锁失败。
 
-					AES_ECB_Encryption(g_private_AES_key, (u8*)serial_number_lock_ack, encrypted_data);
+					AES_ECB_Encryption(nv_params_ptr->AES_Key, (u8*)serial_number_lock_ack, encrypted_data);
 					bls_att_pushNotifyData(BleLockChar2DataHdl, encrypted_data, 16);
 				//}
 			}
@@ -1170,7 +1226,7 @@ int sprocomm_lock_write_evt_handler(rf_packet_att_write_t *p)
 				//	order_num_unlock_ack->tl = 7;//TL为时间长度，其中年份占2个字节，其余月日时分秒各一个字节
 				//	order_num_unlock_ack->rtc = GET_RTC_VAL();
                 //
-				//	AES_ECB_Encryption(g_private_AES_key, (u8*)order_num_unlock_ack, encrypted_data);
+				//	AES_ECB_Encryption(nv_params_ptr->AES_Key, (u8*)order_num_unlock_ack, encrypted_data);
 				//	bls_att_pushNotifyData(BleLockChar2DataHdl, encrypted_data, 16);
 				//}
 			}
@@ -1202,7 +1258,7 @@ int sprocomm_lock_write_evt_handler(rf_packet_att_write_t *p)
 						modify_pwd_ack->tokenack1 = 0x05;
 						modify_pwd_ack->tokenack2 = 0x01;
 						modify_pwd_ack->RET = 0x00;//RET 为状态返回，00 表示修改密码成功，01 表示修改密码失败。
-						AES_ECB_Encryption(g_private_AES_key, (u8*)modify_pwd_ack, encrypted_data);
+						AES_ECB_Encryption(nv_params_ptr->AES_Key, (u8*)modify_pwd_ack, encrypted_data);
 						bls_att_pushNotifyData(BleLockChar2DataHdl, encrypted_data, 16);
 				//  }
 				//}
@@ -1239,15 +1295,15 @@ int sprocomm_lock_write_evt_handler(rf_packet_att_write_t *p)
 						modify_key_ack->RET = 0x01;//RET 为状态返回，00 表示修改密钥成功，01 表示修改密钥失败;
 					}
 
-					AES_ECB_Encryption(g_private_AES_key, (u8*)modify_key_ack, encrypted_data);
+					AES_ECB_Encryption(nv_params_ptr->AES_Key, (u8*)modify_key_ack, encrypted_data);
 					bls_att_pushNotifyData(BleLockChar2DataHdl, encrypted_data, 16);
 
 					//update aes_key
 					if(!modify_key_ack->RET){
 						u8 lock_key[16];//data len should NOT bigger then PARAM_NV_PDU_UNIT
-						extern u8 g_private_AES_key[16];
+						extern u8 nv_params_ptr->AES_Key[16];
 						if(load_param_from_flash(LOCK_AES_KEY_ADR, lock_key, 16)){
-							memcpy(g_private_AES_key, lock_key, 16);
+							memcpy(nv_params_ptr->AES_Key, lock_key, 16);
 						}
 					}
 				}
@@ -1277,7 +1333,7 @@ int sprocomm_lock_write_evt_handler(rf_packet_att_write_t *p)
 						set_lock_work_pattern_ack->RET = 0x01;//RET 为状态返回，00 表示设置成功，01 表示设置失败。
 					}
 
-					AES_ECB_Encryption(g_private_AES_key, (u8*)set_lock_work_pattern_ack, encrypted_data);
+					AES_ECB_Encryption(nv_params_ptr->AES_Key, (u8*)set_lock_work_pattern_ack, encrypted_data);
 					bls_att_pushNotifyData(BleLockChar2DataHdl, encrypted_data, 16);
 				//}
 
@@ -1322,7 +1378,7 @@ int sprocomm_lock_write_evt_handler(rf_packet_att_write_t *p)
 						order_num_unlock_ack->tl = 7;//TL为时间长度，其中年份占2个字节，其余月日时分秒各一个字节
 						order_num_unlock_ack->rtc = GET_RTC_VAL();
 
-						AES_ECB_Encryption(g_private_AES_key, (u8*)order_num_unlock_ack, encrypted_data);
+						AES_ECB_Encryption(nv_params_ptr->AES_Key, (u8*)order_num_unlock_ack, encrypted_data);
 						bls_att_pushNotifyData(BleLockChar2DataHdl, encrypted_data, 16);
 
 						g_is_order_num_unlock = 1;//订单号开锁成功。

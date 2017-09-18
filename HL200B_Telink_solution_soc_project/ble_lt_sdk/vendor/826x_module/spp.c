@@ -39,9 +39,9 @@ int event_handler(u32 h, u8 *para, int n)
 			}
 			case BLT_EV_FLAG_TERMINATE:
 			{
-				printf("terminate event occured!\n\r");
+				printf("BLE disconnect event occured!\n\r");
 				//gpio_write(GREEN_LED,OFF);
-				param_clear_flash(LOCK_AES_KEY_ADR);
+				//param_clear_flash(LOCK_AES_KEY_ADR);
 				break;
 			}
 			case BLT_EV_FLAG_PAIRING_BEGIN:
