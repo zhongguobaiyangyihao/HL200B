@@ -33,7 +33,7 @@
 
 #define CMD_LEN3BYTES(i)                    (i & 0x00ffffff)
 #define GET_CHRG_VOL_TEMP_CMD               (0x010102)
-#define GET_SYNC_TIME_CMD                   (0x040306)
+#define SET_CURRENT_TIME_CMD                (0x0306)
 #define OPEN_THE_LOCK_CMD                   (0x0105)
 #define SERIAL_NUM_LOCK_CMD                 (0x083105)
 #define ORDER_NUM_UNLOCK_CMD                (0x061105)

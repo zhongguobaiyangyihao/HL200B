@@ -4,6 +4,7 @@
 #include "../../proj_lib/ble/service/ble_ll_ota.h"
 #include "spp.h"
 #include "nv.h"
+#include "./time_stamp/time_stamp.h"
 
 #if(__PROJECT_8261_MODULE__ || __PROJECT_8266_MODULE__ || __PROJECT_8267_MODULE__ || __PROJECT_8269_MODULE__)
 
@@ -68,9 +69,6 @@ extern s16  g_curr_temp;
 extern u16  g_curr_charge_vol;
 extern u8   g_password[6];
 extern u16  g_serial_num;
-extern u8   g_curr_status_vib_func;
-extern u8   g_curr_status_vib_status;
-extern u8   g_curr_chg_dischg_state;
 extern u8   g_GSM_ID[6];
 extern u8   g_curr_lock_work_pattern;
 extern u8   g_old_password[6];
@@ -84,10 +82,12 @@ extern u8   g_lock_domains[LOCK_DOMAIN_LEN];
 extern u8   g_is_order_num_unlock;
 extern Flag_t Flag;
 extern device_state_t device_state;
+extern BJ_Time_t BJ_Time;
+extern nv_params_t *nv_params_ptr;
 
 extern void AES_ECB_Encryption(u8 *key, u8 *plaintext, u8 *encrypted_data);
 extern void AES_ECB_Decryption(u8 *key, u8 *encrypted_data, u8 *decrypted_data);
-extern rtc_t get_RTC_value(void);
+extern BJ_Time_t get_RTC_value(void);
 
 
 
@@ -136,9 +136,9 @@ typedef struct
 
 //获取同步时间指令后返回：  06 04 01 RET FILL[12]
 typedef struct{
-	u8 tokenAck1;    //06
-	u8 tokenAck2;	 //04
-	u8 tokenAck3;	 //01
+	u8 tokenack0;    //06
+	u8 tokenack1;	 //04
+	u8 tokenack2;	 //01
 	u8 ret;          //RET 为状态返回，00 表示同步成功，01 表示同步失败。
 	u8 rsvd[12];
 }sync_time_ack_t;
@@ -224,9 +224,9 @@ typedef union
 	struct
 	{
 		u8 lock_switch_status : 1;
-		u8 vib_func           : 1;//振动功能
-		u8 vib_state          : 1;
-		u8 chg_dischg_state   : 1;
+		u8 Gsensor_func       : 1;//振动功能
+		u8 Gsensor_is_vibrating : 1;
+		u8 battery_is_charging  : 1;
 	};
 	u8 g_status_byte;//R[0] 为状态字节
 }work_status_R0_t;
@@ -340,12 +340,12 @@ typedef struct
 
 //开锁指令后返回： 05 02 01 RET TL YY YY MM DD HH mm ss FILL[4]
 typedef struct{
-	u8 tokenAck1;    //05
-	u8 tokenAck2;	 //02
-	u8 tokenAck3;	 //01
+	u8 tokenack0;    //05
+	u8 tokenack1;	 //02
+	u8 tokenack2;	 //01
 	u8 RET;          //RET 为状态返回，00 表示开锁成功，01 表示开锁失败
 	u8 tl;           //TL为时间长度，其中年份占2个字节，其余月日时分秒各一个字节
-	rtc_t rtc;
+	BJ_Time_t rtc;
 	u8 rsvd[4];
 }open_lock_ack_t;
 
@@ -365,7 +365,7 @@ typedef struct{
 	u8 tokenAck3;	 //01
 	u8 RET;          //RET 为状态返回，00 表示开锁成功，01 表示开锁失败
 	u8 tl;           //TL为时间长度，其中年份占2个字节，其余月日时分秒各一个字节
-	rtc_t rtc;
+	BJ_Time_t rtc;
 	u8 rsvd[4];
 }order_num_unlock_ack_t;
 
@@ -381,7 +381,7 @@ typedef struct{
 	u8 tokenAck3;	 //01
 	u8 RET;          //RET 为状态返回，00 表示关锁成功，01 表示关锁失败
 	u8 tl;           //TL为时间长度，其中年份占2个字节，其余月日时分秒各一个字节
-	rtc_t rtc;
+	BJ_Time_t rtc;
 	u8 rsvd[4];
 }order_num_lock_send1_t;
 typedef struct{
@@ -475,6 +475,24 @@ int hemiaolock_read(void * p)
 	return 0;
 }
 /************************************************************
+ble_return_lock_on_result
+************************************************************/
+void ble_return_lock_on_result(u8 result)
+{
+	u8 tmp_buffer[20];
+	u8 encrypted_data[16];//S->M encryption
+	open_lock_ack_t* open_lock_ack = (open_lock_ack_t*)tmp_buffer;
+	open_lock_ack->tokenack0 = 0x05;
+	open_lock_ack->tokenack1 = 0x02;
+	open_lock_ack->tokenack2 = 0x01;
+	open_lock_ack->RET = result;//RET 为状态返回，00 表示开锁成功，01 表示开锁失败。
+	open_lock_ack->tl = 7;//TL为时间长度，其中年份占2个字节，其余月日时分秒各一个字节
+	open_lock_ack->rtc = BJ_Time;
+
+	AES_ECB_Encryption(g_private_AES_key, (u8*)open_lock_ack, encrypted_data);
+	bls_att_pushNotifyData(BleLockChar2DataHdl, encrypted_data, 16);
+}
+/************************************************************
 ble_return_domain_operation
 ************************************************************/
 void ble_return_domain_operation(void)
@@ -511,9 +529,14 @@ void ble_return_domain_operation(void)
 /************************************************************
 token check
 ************************************************************/
-static u8 gap_check_token_is_met(u32 *token_ptr)
+static u8 gap_check_token_is_met(u8 *token_ptr)
 {
-	return((*token_ptr) == g_token);
+	return(
+			((*token_ptr)     == ((g_token&0x000000FF)>>0))  &&
+			((*(token_ptr+1)) == ((g_token&0x0000FF00)>>8))  &&
+			((*(token_ptr+2)) == ((g_token&0x00FF0000)>>16)) &&
+			((*(token_ptr+3)) == ((g_token&0xFF000000)>>24))
+		  );
 }
 /************************************************************
 Function for handling the Write event.
@@ -603,9 +626,9 @@ int sprocomm_lock_write_evt_handler(rf_packet_att_write_t *p)
 				get_lock_work_status_ack->tokenack1 = 0x22;
 				get_lock_work_status_ack->tokenack2 = 0x08;
 				get_lock_work_status_ack->R.R0.lock_switch_status = device_state.lock_onoff_state;
-				get_lock_work_status_ack->R.R0.vib_func = g_curr_status_vib_func;
-				get_lock_work_status_ack->R.R0.vib_state = g_curr_status_vib_status;
-				get_lock_work_status_ack->R.R0.chg_dischg_state = g_curr_chg_dischg_state;
+				get_lock_work_status_ack->R.R0.Gsensor_func = device_state.Gsensor_is_abnormal;
+				get_lock_work_status_ack->R.R0.Gsensor_is_vibrating = device_state.Gsensor_is_vibrating;
+				get_lock_work_status_ack->R.R0.battery_is_charging = device_state.battery_is_charging;
 				get_lock_work_status_ack->R.R1_GSM_status = g_GSM_status;
 				get_lock_work_status_ack->R.R2_last_GPRS_online_need_time = g_last_GPRS_online_need_time;
 				get_lock_work_status_ack->R.R3_last_GPRS_rssi_val = g_last_GPRS_rssi_val;
@@ -690,33 +713,70 @@ int sprocomm_lock_write_evt_handler(rf_packet_att_write_t *p)
 				bls_att_pushNotifyData(BleLockChar2DataHdl, encrypted_data, 16);
 				break;
 			}
-		    case GET_LOCK_DOMAINS_CMD:
+		    case GET_LOCK_DOMAINS_CMD://0x05 0x30
 			{
 				if(!gap_check_token_is_met(decrypted_data+4))
 				{
 					break;
 				}
 				Flag.is_return_domain_via_ble = 1;
-				printf("GET_LOCK_DOMAINS_CMD.\n");
+				printf("GET_LOCK_DOMAINS_CMD.\r\n");
 				break;
 			}
-		    case OPEN_THE_LOCK_CMD: //open the lock
+		    case OPEN_THE_LOCK_CMD: //0x05 0x01
 			{
-				printf("OPEN_THE_LOCK_CMD.\n");
-				Flag.is_turnon_lock = 1;
-#if 0
-				memcpy(g_password, decrypted_data+3, 6);
-				open_lock_ack_t* open_lock_ack = (open_lock_ack_t*)p;
-				open_lock_ack->tokenAck1 = 0x05;
-				open_lock_ack->tokenAck2 = 0x02;
-				open_lock_ack->tokenAck3 = 0x01;
-				open_lock_ack->RET = 0;//RET 为状态返回，00 表示开锁成功，01 表示开锁失败。
-				open_lock_ack->tl = 7;//TL为时间长度，其中年份占2个字节，其余月日时分秒各一个字节
-				open_lock_ack->rtc = GET_RTC_VAL();
-
-				AES_ECB_Encryption(g_private_AES_key, (u8*)open_lock_ack, encrypted_data);
+				printf("OPEN_THE_LOCK_CMD0.\r\n");
+				if(!gap_check_token_is_met(decrypted_data+9))
+				{
+					printf("token is 0x%x  0x%x  0x%x  0x%x.\r\n",(*(u8 *)(decrypted_data+9)),(*(u8 *)(decrypted_data+10)),(*(u8 *)(decrypted_data+11)),(*(u8 *)(decrypted_data+12)));
+					break;
+				}
+				printf("OPEN_THE_LOCK_CMD.\r\n");
+				if(
+					(nv_params_ptr->lock_on_pwd[0] != *((u8 *)(decrypted_data+3)))||
+					(nv_params_ptr->lock_on_pwd[1] != *((u8 *)(decrypted_data+4)))||
+					(nv_params_ptr->lock_on_pwd[2] != *((u8 *)(decrypted_data+5)))||
+					(nv_params_ptr->lock_on_pwd[3] != *((u8 *)(decrypted_data+6)))||
+					(nv_params_ptr->lock_on_pwd[4] != *((u8 *)(decrypted_data+7)))||
+					(nv_params_ptr->lock_on_pwd[5] != *((u8 *)(decrypted_data+8)))
+				  )
+				{
+					printf("LOCK on key fail.\r\n");
+					break;
+				}
+				if(device_state.lock_onoff_state == lock_onoff_state_on)
+				{
+					printf("LOCK is on state.\r\n");
+					ble_return_lock_on_result(0);
+				}
+				else
+				{
+					printf("LOCK is open....\r\n");
+				    Flag.is_turnon_lock_via_ble = 1;
+				}
+				break;
+			}
+		    case SET_CURRENT_TIME_CMD://0x06 03
+			{
+				if(!gap_check_token_is_met(decrypted_data+7))
+				{
+					break;
+				}
+				printf("SET_CURRENT_TIME_CMD.\r\n");
+				mytime_struct mytime;
+				g_current_time = MAKE_U32(decrypted_data[6], decrypted_data[5], decrypted_data[4], decrypted_data[3]);
+				utc_sec_2_mytime(g_current_time, &mytime, 0);
+				BJ_Time.year = mytime.nYear;BJ_Time.month = mytime.nMonth;BJ_Time.day = mytime.nDay;
+				BJ_Time.hour = mytime.nHour;BJ_Time.minute = mytime.nMin;BJ_Time.second = mytime.nSec;
+				printf("Current time: %d-%d-%d-%d-%d-%d.",BJ_Time.year,BJ_Time.month,BJ_Time.day,BJ_Time.hour,BJ_Time.minute,BJ_Time.second);printf("\r\n");
+				sync_time_ack_t* sync_time_ack = (sync_time_ack_t*)p;
+				sync_time_ack->tokenack0 = 0x06;
+				sync_time_ack->tokenack1 = 0x04;
+				sync_time_ack->tokenack2 = 0x01;
+				sync_time_ack->ret = 0x00;
+				AES_ECB_Encryption(g_private_AES_key, (u8*)sync_time_ack, encrypted_data);
 				bls_att_pushNotifyData(BleLockChar2DataHdl, encrypted_data, 16);
-#endif
+				break;
 			}
 			default:
 			{

@@ -131,11 +131,10 @@ int mini_printf(const char *format, ...){
 u8 HexTable[]={'0','1','2','3','4','5','6','7','8','9','A','B','C','D','E','F'};
 void PrintHex(u8 x)
 {
-	uart_put_char('0');
-	uart_put_char('x');
+	//uart_put_char('0');
+	//uart_put_char('x');
 	uart_put_char(HexTable[x>>4]);
 	uart_put_char(HexTable[x&0xf]);
 	uart_put_char(' ');
 }
-
 #endif

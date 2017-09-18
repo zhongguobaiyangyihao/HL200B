@@ -3,7 +3,7 @@
 #include "../../proj_lib/pm.h"
 #include "../../proj_lib/ble/ll/ll.h"
 #include "../../proj_lib/ble/blt_config.h"
-#include "../../vendor/826x_module/GPS_GPRS_Communicate/gprs_gps_module_communicate.h"
+#include "../../vendor/826x_module/Module_Communicate/gprs_gps_module_communicate.h"
 #include "spp.h"
 #include "nv.h"
 
@@ -86,16 +86,21 @@ int rx_from_uart_cb (void)//UART data send to Master,we will handler the data as
 
 	if (rx_len)
 	{
+#if 0
 		extern int bls_uart_handler (u8 *p, int n);
 		bls_uart_handler(&p[4], rx_len - 4);
+#else
+		extern int bls_uart_handler (u8 *p, int n);
+		bls_uart_handler(&p[4], rx_len);
+#endif
 		my_fifo_pop(&uart_rx_fifo);
 	}
-
 	return 0;
 }
-
-///////////////////////////////////////////the default bls_uart_handler///////////////////////////////
-int bls_uart_handler (u8 *p, int n)
+/*
+ *uart data receive handler
+ */
+int bls_uart_handler(u8 *p, int n)
 {
 	memcpy(&UART_RX_BUF_FROMMODULE[UART_RX_BUF_FROMMODULE_CNT],p,n);
 	UART_RX_BUF_FROMMODULE_CNT += n;
@@ -108,13 +113,11 @@ int bls_uart_handler (u8 *p, int n)
 
 int hci_send_data (u32 h, u8 *para, int n)
 {
-
 	u8 *p = my_fifo_wptr (&uart_tx_fifo);
 	if (!p || n >= uart_tx_fifo.size)
 	{
 		return -1;
 	}
-
 #if (BLE_MODULE_INDICATE_DATA_TO_MCU)
 	if(!module_uart_data_flg){ //UART idle, new data is sent
 		GPIO_WAKEUP_MCU_HIGH;  //Notify MCU that there is data here

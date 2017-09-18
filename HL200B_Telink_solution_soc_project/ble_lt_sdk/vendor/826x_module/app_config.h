@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../../proj/common/types.h"
+#include "../../proj/common/string.h"
 
 /* Enable C linkage for C++ Compilers: */
 #if defined(__cplusplus)
@@ -22,9 +23,12 @@ extern "C" {
 #define OPEN_LOCK_CHECK_PIN                  GPIO_PA1//开锁MPOS_IN_PIN
 #define RF_POWERON_PIN                       GPIO_PE3
 #define SC6531_RESET                         GPIO_PE2
+#define GSM_WAKEUP                           GPIO_PD3
 
 #define MOTOR_PWM0                           GPIO_PC5
 #define MOTOR_PWM1                           GPIO_PC4
+
+#define BUZZ_EN_PIN                          GPIO_PA7
 /****************************************************************************/
 /////////////////////HCI ACCESS OPTIONS///////////////////////////////////////
 #define HCI_USE_UART	1
@@ -35,7 +39,12 @@ extern "C" {
 #define IDL				0x05//产品编号低字节	物联锁统一进行分配和管理
 #define IDH             0x0B//产品编号低字节
 #define VER             0x11//蓝牙锁固件版本号，由固件开发人员自行维护，典型是拆成 2 个 4 位的 BCD 码
-
+typedef struct
+{
+	u8                 AES_Key[16];
+    u8                 lock_on_pwd[6];
+    u8                 reserved[4];
+}nv_params_t;
 typedef enum
 {
 	lock_onoff_state_on = 0,
@@ -46,7 +55,7 @@ typedef struct
 	u8  reserved0                     : 1;
 	u8  reserved1                     : 1;
 	u8  reserved2                     : 1;
-	u8  is_turnon_lock                : 1;
+	u8  is_turnon_lock_via_ble        : 1;
 	u8  is_lockoff_event_occur        : 1;
 	u8  is_return_domain_via_ble      : 1;
 	u8  is_module_excute              : 1;
@@ -59,20 +68,21 @@ typedef struct
 	u8  reserved1                     : 1;
 	u8  reserved2                     : 1;
 	u8  reserved3                     : 1;
-	u8  reserved4                     : 1;
-	u8  reserved5                     : 1;
-	u8  reserved6                     : 1;
+	u8  battery_is_charging           : 1;
+	u8  Gsensor_is_vibrating          : 1;
+	u8  Gsensor_is_abnormal           : 1;
 	u8  lock_onoff_state              : 1;
 }device_state_t;
-///////////////////// RTC 时间相关的 /////////////////////////
-typedef struct{
+
+typedef struct
+{
 	u16 year;
 	u8 month;
 	u8 day;
 	u8 hour;
 	u8 minute;
 	u8 second;
-}rtc_t;
+}BJ_Time_t;
 
 
 
@@ -84,16 +94,7 @@ typedef struct{
 ///////////////////// 锁的工作状态 ////////////////////////////
 //R0
 enum work_status_R0
-{//R[0] 为状态字节，是按位再细分的
-	//bit0
-	open = 0,//第 0 位为锁开关状态，0 开 1关；
-	close,
-	//bit1
-	normal = 0,//第 1 位为振动功能，0 正常 1 故障;
-	fault,
-	//bit2
-	motionless = 0,//第 2 位为振动状态，0 静止 1 振动；
-	vibration,
+{
 	//bit3
 	discharge = 0,//第 3 位为充放电状态，0 放电1 有充电。
 	charging,
@@ -186,6 +187,7 @@ enum work_status_R0
 ////////////// nv management //////////////////////////////
 
 //User data adr in FLASH
+#define NV_PARAMS_ADR                       0x70000
 #define LOCK_AES_KEY_ADR 			        0x70000
 #define SET_LOCK_WORK_MOD_ADR 			    0x71000
 

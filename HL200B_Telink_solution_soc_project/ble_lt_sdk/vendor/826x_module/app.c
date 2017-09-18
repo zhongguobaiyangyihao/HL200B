@@ -11,7 +11,7 @@
 #include "../../proj/drivers/battery.h"
 #include "../../proj_lib/ble/blt_config.h"
 #include "../../proj_lib/ble/ble_smp.h"
-#include "../../vendor/826x_module/GPS_GPRS_Communicate/gprs_gps_module_communicate.h"
+#include "../../vendor/826x_module/Module_Communicate/gprs_gps_module_communicate.h"
 #include "nv.h"
 
 #if (HCI_ACCESS==HCI_USE_UART)
@@ -38,9 +38,13 @@ int		module_task_busy;
 #define UART_RX_BUSY			(uart_rx_fifo.rptr != uart_rx_fifo.wptr)
 /////////////////////////////// AES-ECB concerned ///////////////////////////////////////////
 u32 	g_token;//Token
-u8      g_private_AES_key[16] 	= { 32, 87, 47, 82, 54, 75, 63, 71, 48, 80, 65, 88, 17, 99, 45, 43};//Key fixing
-//u8      g_private_AES_key[16] 	= {0x3A, 0x60, 0x43, 0x2A, 0x5C, 0x01, 0x21, 0x1F, 0x29, 0x1E, 0x0F, 0x4E, 0x0C, 0x13, 0x28, 0x25};//Key fixing
+u8      g_private_AES_key[16] 	= { 0x20, 0x57, 0x2F, 0x52, 0x36, 0x4B, 0x3F, 0x47, 0x30, 0x50, 0x41, 0x58, 0x11, 0x63, 0x2D, 0x2B};//Key fixing
+u8      g_private_lockon_key[6] = {0x30, 0x30, 0x30, 0x30, 0x30, 0x30};
 device_state_t           device_state;
+nv_params_t              *nv_params_ptr;
+BJ_Time_t                BJ_Time;
+const u8                 daynumber_leap[13]={0,31,29,31,30,31,30,31,31,30,31,30,31};
+const u8                 daynumber[13]     ={0,31,28,31,30,31,30,31,31,30,31,30,31};
 extern  Flag_t           Flag;
 /**************************************************************************/
 static void user_timer0_timeout_handler(void);
@@ -64,16 +68,17 @@ extern void module_schedule_handler(void);
 extern void ble_return_domain_operation(void);
 extern void battery_power_check(void);
 extern void Lock_gpio_interrupt_init(void);
-extern void Lock_turnon_operation(void);
+extern u8 Lock_turnon_operation(void);
+extern void ble_return_lock_on_result(u8 result);
+extern nv_params_storage(nv_params_t *nv_params_ptr);
+extern void buzzer_schedule_handler(void);
+extern void buzzer_turnon_lock_indicate(void);
 /**************************************************************************/
 /////////////////////////////// HemiaoLock concerned ///////////////////////////////////////////
 u32 g_current_time;
 u32 g_locked_time;
 u16 g_serialNum;
 u8  g_curr_power_level;
-u8  g_curr_status_vib_func = normal;
-u8  g_curr_status_vib_status = motionless;
-u8  g_curr_chg_dischg_state = discharge;
 u8  g_GSM_ID[6] = {1,2,3,4,5,6};
 u8  g_GSM_ver[GSM_VER_LEN] = {GSM_VER};
 u8  g_lock_ICCID[LOCK_ICCID_LEN] = {LOCK_ICCID};
@@ -91,13 +96,13 @@ u8  g_new_password[6];
 u8  g_new_key[16];
 u16 g_serial_num;//NO
 
-rtc_t get_RTC_value(void);
+BJ_Time_t get_RTC_value(void);
 
 //get RTC : 年-月-日-时-分-秒信息
 //TODO:待实现
-rtc_t get_RTC_value(void){
+BJ_Time_t get_RTC_value(void){
 
-	rtc_t RTC;
+	BJ_Time_t RTC;
 	RTC.year = 0x2017;
 	RTC.month = 0x08;
 	RTC.day =  0x25;
@@ -278,6 +283,13 @@ static void user_timer_init(void)
 	reg_tmr0_capt = CLOCK_SYS_CLOCK_1MS*GPRS_GPS_MODULE_COMMUNICATE_INTERVAL;
 	reg_tmr_sta = FLD_TMR_STA_TMR0; //clear irq status
 	reg_tmr_ctrl |= FLD_TMR0_EN;  //start timer
+
+	//timer1 irq
+	reg_irq_mask |= FLD_IRQ_TMR1_EN;
+	reg_tmr1_tick = 0; //clear counter
+	reg_tmr1_capt = CLOCK_SYS_CLOCK_1S;
+	reg_tmr_sta = FLD_TMR_STA_TMR1; //clear irq status
+	reg_tmr_ctrl |= FLD_TMR1_EN;  //start timer
 }
 /*
  * TIMER0 Timeout handler
@@ -290,6 +302,61 @@ void TIMER0_Timeout_handler(void)
 		Flag.is_module_excute = 1;
 	}
 }
+/******************************************************************************
+leapyear judgement
+******************************************************************************/
+static u8 leapyear_judgement(void)
+{
+	u8 is_leap_year;
+    u16 year = BJ_Time.year;
+    if((((year%4)==0)&&(year%100!=0))||(year%400==0))
+      is_leap_year = 1;
+    else
+      is_leap_year = 0;
+    return is_leap_year;
+}
+/*
+ * TIMER1 Timeout handler
+ */
+void TIMER1_Timeout_handler(void)
+{
+	u8 tmp_daynumber;
+	if(reg_tmr_sta & FLD_TMR_STA_TMR1)
+	{
+		reg_tmr_sta = FLD_TMR_STA_TMR1; //clear irq status
+		BJ_Time.second++;
+		if(BJ_Time.second>=60)
+		{
+			BJ_Time.second = 0;
+			BJ_Time.minute++;
+			/***************************************************/
+			if(BJ_Time.minute >= 60)
+			{
+				BJ_Time.minute = 0;
+				BJ_Time.hour++;
+				if(BJ_Time.hour >=24)
+				{
+					BJ_Time.hour = 0;
+					BJ_Time.day ++;
+					if(leapyear_judgement())
+						tmp_daynumber = daynumber_leap[BJ_Time.month];
+					else
+						tmp_daynumber = daynumber[BJ_Time.month];
+					if(BJ_Time.day>tmp_daynumber)
+					{
+						BJ_Time.day = 1;
+						BJ_Time.month++;
+						if(BJ_Time.month>=13)
+						{
+							BJ_Time.month = 1;
+							BJ_Time.year++;
+						}
+					}
+				}
+			}
+		}
+	}
+}
 /*
  * user_timer0_timeout_handler
  */
@@ -300,11 +367,12 @@ static void user_timer0_timeout_handler(void)
 	if(time_cnt>=(1000/GPRS_GPS_MODULE_COMMUNICATE_INTERVAL))
 	{
 		time_cnt = 0;
-		printf("Program run heart.\r\n");
+		//printf("Program run heart.\r\n");
 		//gsensor_3axis_data_inquiry();
 	}
 	module_transmit_receive_handler();
 	module_schedule_handler();
+	buzzer_schedule_handler();
 }
 /*
  * user_gpio_init
@@ -330,26 +398,41 @@ static void user_gpio_init(void)
 	gpio_set_output_en(MOTOR_PWM1, 1);
 	gpio_write(MOTOR_PWM1,OFF);
 
-	//展讯模块控制上下电管脚
+	//SC6531 POWER
 	gpio_set_func(RF_POWERON_PIN,AS_GPIO);
 	gpio_setup_up_down_resistor(RF_POWERON_PIN, PM_PIN_UP_DOWN_FLOAT);
 	gpio_set_input_en(RF_POWERON_PIN,0);
 	gpio_set_output_en(RF_POWERON_PIN, 1);
 	gpio_write(RF_POWERON_PIN,OFF);
 
-	//展讯模块复位管脚
+	//SC6531 RESET PIN
 	gpio_set_func(SC6531_RESET,AS_GPIO);
 	gpio_setup_up_down_resistor(SC6531_RESET, PM_PIN_UP_DOWN_FLOAT);
 	gpio_set_input_en(SC6531_RESET,0);
-	gpio_set_output_en(RF_POWERON_PIN, 1);
+	gpio_set_output_en(SC6531_RESET, 1);
 	gpio_write(SC6531_RESET,ON);
+
+	//SC6531F WAKEUP PIN
+	gpio_set_func(GSM_WAKEUP,AS_GPIO);
+	gpio_setup_up_down_resistor(GSM_WAKEUP, PM_PIN_UP_DOWN_FLOAT);
+	gpio_set_input_en(GSM_WAKEUP,0);
+	gpio_set_output_en(GSM_WAKEUP, 1);
+	gpio_write(GSM_WAKEUP,ON);
+
+	//BUZZ_EN PIN
+	gpio_set_func(BUZZ_EN_PIN,AS_GPIO);
+	gpio_setup_up_down_resistor(BUZZ_EN_PIN, PM_PIN_UP_DOWN_FLOAT);
+	gpio_set_input_en(BUZZ_EN_PIN,0);
+	gpio_set_output_en(BUZZ_EN_PIN, 1);
+	gpio_write(BUZZ_EN_PIN,OFF);
 }
 /*
- * falsh_init
+ * flash_init
  */
 static void user_flash_init(void)
 {
-	u8  AES_Buffer[16];
+	nv_params_t        nv_params;
+	u8                 is_need_storage = 0;
 #if 0
 	/*user flash data load*/
 	//1.load lock aes key
@@ -363,7 +446,8 @@ static void user_flash_init(void)
 	param_clear_flash(LOCK_AES_KEY_ADR);
 	printf("/************************clear->SET_LOCK_WORK_MOD_ADR*******************************/\r\n");
 	param_clear_flash(SET_LOCK_WORK_MOD_ADR);
-#else
+#elif 0
+	u8  AES_Buffer[16];
 	u8 rec_buff[16];
 	printf("/************************load->LOCK_AES_KEY_ADR*******************************/\r\n");
 	printf("AES_KEY:");
@@ -387,6 +471,59 @@ static void user_flash_init(void)
 			memcpy(g_private_AES_key,AES_Buffer,16);
 		}
 	}
+
+#else
+	nv_params_ptr = (volatile u32 *)NV_PARAMS_ADR;
+	u8 rec_buff[16];
+	u8 err_code;
+	printf("/************************load->NV_PARAMS_ADR*******************************/\r\n");
+	printf("AES_KEY:");
+	for(u8 i=0;i<16;i++)
+	{
+		printf("0x%x ",g_private_AES_key[i]);
+	}
+	printf("\r\n");
+	printf("Flash_storage_AES_KEY:");
+	for(u8 i=0;i<16;i++)
+	{
+		printf("0x%x ",nv_params_ptr->AES_Key[i]);
+	}
+	printf("\r\n");
+	if((nv_params_ptr->AES_Key[0] != 0xFF)||(nv_params_ptr->AES_Key[1] != 0xFF)||
+	   (nv_params_ptr->AES_Key[2] != 0xFF)||(nv_params_ptr->AES_Key[3] != 0xFF)||
+	   (nv_params_ptr->AES_Key[4] != 0xFF)||(nv_params_ptr->AES_Key[5] != 0xFF)||
+	   (nv_params_ptr->AES_Key[6] != 0xFF)||(nv_params_ptr->AES_Key[7] != 0xFF)||
+	   (nv_params_ptr->AES_Key[8] != 0xFF)||(nv_params_ptr->AES_Key[9] != 0xFF)||
+	   (nv_params_ptr->AES_Key[10] != 0xFF)||(nv_params_ptr->AES_Key[11] != 0xFF)||
+	   (nv_params_ptr->AES_Key[12] != 0xFF)||(nv_params_ptr->AES_Key[13] != 0xFF)||
+	   (nv_params_ptr->AES_Key[14] != 0xFF)||(nv_params_ptr->AES_Key[15] != 0xFF)
+	  )
+	{
+		memcpy(g_private_AES_key,nv_params_ptr->AES_Key,16);
+	}
+	else
+	{
+		is_need_storage = 1;
+		memcpy(nv_params.AES_Key,g_private_AES_key,16);
+	}
+	if((nv_params_ptr->AES_Key[0] != 0xFF)||(nv_params_ptr->AES_Key[1] != 0xFF)||
+	   (nv_params_ptr->AES_Key[2] != 0xFF)||(nv_params_ptr->AES_Key[3] != 0xFF)||
+	   (nv_params_ptr->AES_Key[4] != 0xFF)||(nv_params_ptr->AES_Key[5] != 0xFF)
+      )
+	{
+		memcpy(g_private_lockon_key,nv_params_ptr->lock_on_pwd,6);
+	}
+	else
+	{
+		is_need_storage = 1;
+		memcpy(nv_params.lock_on_pwd,g_private_lockon_key,6);
+	}
+	if(is_need_storage)
+	{
+		is_need_storage = 0;
+		err_code = nv_params_storage(&nv_params);
+		printf("Flash storage result:%d.\r\n",err_code);
+	}
 #endif
 }
 /*
@@ -395,21 +532,12 @@ static void user_flash_init(void)
 static user_uart_init(void)
 {
 	//uart
-	//one gpio should be configured to act as the wakeup pin if in power saving mode; pending
-	#if __PROJECT_8266_MODULE__
-		gpio_set_func(GPIO_UTX, AS_UART);
-		gpio_set_func(GPIO_URX, AS_UART);
-		gpio_set_input_en(GPIO_UTX, 1);
-		gpio_set_input_en(GPIO_URX, 1);
-		gpio_write (GPIO_UTX, 1);			//pull-high RX to avoid mis-trig by floating signal
-		gpio_write (GPIO_URX, 1);			//pull-high RX to avoid mis-trig by floating signal
-	#else
-		gpio_set_input_en(GPIO_PC2, 1);
-		gpio_set_input_en(GPIO_PC3, 1);
-		gpio_setup_up_down_resistor(GPIO_PC2, PM_PIN_PULLUP_1M);
-		gpio_setup_up_down_resistor(GPIO_PC3, PM_PIN_PULLUP_1M);
-		uart_io_init(UART_GPIO_8267_PC2_PC3);
-	#endif
+	gpio_set_input_en(GPIO_PC2, 1);
+	gpio_set_input_en(GPIO_PC3, 1);
+	gpio_setup_up_down_resistor(GPIO_PC2, PM_PIN_PULLUP_1M);
+	gpio_setup_up_down_resistor(GPIO_PC3, PM_PIN_PULLUP_1M);
+	uart_io_init(UART_GPIO_8267_PC2_PC3);
+
 	reg_dma_rx_rdy0 = FLD_DMA_UART_RX | FLD_DMA_UART_TX;                    //clear uart rx/tx status
 	CLK16M_UART115200;
 	uart_BuffInit(uart_rx_fifo_b, uart_rx_fifo.size, uart_tx_fifo_b);
@@ -497,21 +625,24 @@ void user_init()
 	s8  err_code = 0;
 	memset(&Flag,0,sizeof(Flag));
 	memset(&device_state,0,sizeof(device_state));
+	BJ_Time.year = 2017;BJ_Time.month = 1;BJ_Time.day = 1;BJ_Time.hour = 12;BJ_Time.minute = 5;BJ_Time.second = 5;
 	err_code = gsensor_init();
 	if(err_code == 0)
 	{
 		printf("Gsensor init success.\r\n");
 		gsensor_pwr_on();
+		device_state.Gsensor_is_abnormal = 0;
 	}
 	else
 	{
+		device_state.Gsensor_is_abnormal = 1;
 		printf("Gsensor init fail,err_code = 0x%x.\r\n",err_code);
 	}
 	user_gpio_interrupt_init();
 	user_timer_init();
 	user_gpio_init();
 	user_led_init();
-	//user_uart_init();
+	user_uart_init();
 	user_flash_init();
 	ble_init();
 	usb_dp_pullup_en(1);                           //open USB enum
@@ -562,6 +693,7 @@ void user_init()
 void main_loop()
 {
 	static u32 tick_loop;
+	u8         lock_on_result;
 	tick_loop ++;
 	////////////////////////////////////// BLE entry /////////////////////////////////
 	blt_sdk_main_loop();
@@ -582,10 +714,13 @@ void main_loop()
     	Flag.is_return_domain_via_ble = 0;
     	ble_return_domain_operation();
     }
-    if(Flag.is_turnon_lock)
+    if(Flag.is_turnon_lock_via_ble)
     {
-    	Flag.is_turnon_lock = 0;
-        Lock_turnon_operation();
+    	Flag.is_turnon_lock_via_ble = 0;
+    	lock_on_result = Lock_turnon_operation();
+        ble_return_lock_on_result(lock_on_result);
+        if(!lock_on_result)
+        	buzzer_turnon_lock_indicate();
     }
 }
 

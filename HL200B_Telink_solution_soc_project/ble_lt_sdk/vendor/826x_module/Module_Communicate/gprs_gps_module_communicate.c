@@ -35,6 +35,13 @@ void module_pwron(void)
 	gpio_write(RF_POWERON_PIN,ON);
 }
 /************************************************************************
+ * module_wakeup
+************************************************************************/
+void module_wakeup(void)
+{
+	gpio_write(GSM_WAKEUP,0);
+}
+/************************************************************************
  * module_pwroff
 ************************************************************************/
 void module_pwroff(void)
@@ -101,7 +108,7 @@ static void module_turnon_schedule(void)
 		{
 			if(!is_config_sent)
 			{
-				//module_config_params((u8 *)module_cmd_AT,strlen(module_cmd_AT),"OK",3,WAIT_TIME_ONE_SECOND);
+				module_config_params((u8 *)module_cmd_AT,strlen(module_cmd_AT),"OK",5,WAIT_TIME_ONE_SECOND);
 				is_config_sent = 1;
 			}
 			else
@@ -180,6 +187,7 @@ void module_transmit_receive_handler(void)
 				{
 					if(Check_String(UART_RX_BUF_FROMMODULE, UART_RX_BUF_FROMMODULE_CNT, MODULE_TRANSREC_RETURN_DATA_CHECK, MODULE_TRANSREC_RETURN_DATA_CHECK_LEN))
 					{
+						printf("uart rec: ");foreach(i, UART_RX_BUF_FROMMODULE_CNT){PrintHex(*((u8*)UART_RX_BUF_FROMMODULE+i));}printf("\r\n");
 						MODULE_TRANSREC_RETURN_RESULT = Config_success;
 						transrec_waiting_time_cnt = 0;
 						transrec_retry_number = 0;
@@ -189,6 +197,7 @@ void module_transmit_receive_handler(void)
 			}
 			else
 			{
+				printf("uart rec: ");foreach(i, UART_RX_BUF_FROMMODULE_CNT){printf("%c",*((u8*)UART_RX_BUF_FROMMODULE+i));}printf("\r\n");
 				transrec_waiting_time_cnt = 0;
 				transrec_retry_number++;
 				if(transrec_retry_number < MODULE_TRANSREC_RETURN_DATA_RETRY_NUMBER)

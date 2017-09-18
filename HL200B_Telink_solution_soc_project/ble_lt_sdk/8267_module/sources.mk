@@ -17,12 +17,14 @@ SIZEDUMMY :=
 # Every subdirectory with source files must be described here
 SUBDIRS := \
 vendor/common \
+vendor/826x_module/time_stamp \
 vendor/826x_module \
 vendor/826x_module/slip_protocol \
 vendor/826x_module/da213 \
+vendor/826x_module/Module_Communicate \
 vendor/826x_module/MC3416 \
 vendor/826x_module/Lock \
-vendor/826x_module/GPS_GPRS_Communicate \
+vendor/826x_module/Buzzer \
 proj/mcu_spec \
 proj/mcu \
 proj/drivers \

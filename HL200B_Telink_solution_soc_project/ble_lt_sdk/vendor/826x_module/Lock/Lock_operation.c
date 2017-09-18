@@ -73,7 +73,7 @@ static void Lock_motor_stop(void)
 /*******************************************
 开锁操作
 *******************************************/
-void Lock_turnon_operation(void)
+u8 Lock_turnon_operation(void)
 {
 	u32 start_tick = clock_time();
 	u32 delay_tick;
@@ -83,7 +83,7 @@ void Lock_turnon_operation(void)
 		if(clock_time_exceed(start_tick,5000*1000))
 		{
 			Lock_motor_stop();
-			return;
+			return 1;
 		}
 
 		if(!((volatile u32)gpio_read(CLOSE_LOCK_CHECK_PIN)))
@@ -103,7 +103,7 @@ void Lock_turnon_operation(void)
 		if(clock_time_exceed(start_tick,5000*1000))
 		{
 			Lock_motor_stop();
-			return;
+			return 1;
 		}
 
 		if((volatile u32)gpio_read(OPEN_LOCK_CHECK_PIN))
@@ -121,7 +121,7 @@ void Lock_turnon_operation(void)
 	while(!clock_time_exceed(start_tick,20*1000));
 	Lock_motor_stop();
 	device_state.lock_onoff_state = lock_onoff_state_on;
-
+	return 0;
 }
 /*******************************************
 关锁操作

@@ -41,6 +41,7 @@ _attribute_ram_code_ void irq_handler(void)
     gsensor_gpio_irq_proc();
     Lock_gpio_irq_proc();
     TIMER0_Timeout_handler();
+    TIMER1_Timeout_handler();
 }
 /**********************************
 main function

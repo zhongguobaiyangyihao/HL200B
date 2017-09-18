@@ -1,5 +1,6 @@
 
 #include "nv.h"
+#include "app_config.h"
 
 //////////////////////////////////// flash NV management ////////////////////////////////////
 //Notice:flash_erase_sector should place at user_init(), Do Not use this function in main_loop()!!!
@@ -175,3 +176,25 @@ u8 save_param_nv(u32 addr, u8* buf, u16 len)
 	return 0;
 }
 #endif
+/**********************************************************************
+Store nv params into region in flash
+/**********************************************************************/
+u8 nv_params_storage(nv_params_t *nv_params_ptr)
+{
+	u8 error_code = 0;
+	u16 len = sizeof(nv_params_t);
+	error_code = param_clear_flash(NV_PARAMS_ADR);
+	if(error_code != 0)
+	{
+		return error_code;
+	}
+	for(u32 i=0;i<len;)
+	{
+	  if((len-i) >= FLASH_PAGE_SIZE)
+		  flash_write_page(NV_PARAMS_ADR+i, FLASH_PAGE_SIZE, nv_params_ptr+i);
+	  else
+		  flash_write_page(NV_PARAMS_ADR+i, len, nv_params_ptr+i);
+	  i += FLASH_PAGE_SIZE;
+	}
+	return 0;
+}
