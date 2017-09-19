@@ -80,6 +80,7 @@ extern nv_params_t *ble_update_nv_params_ptr_inquiry(void);
 extern void ble_return_lockon_password_update_result(u8 result);
 extern void ble_return_lock_off_result_order(u8 result);
 extern void ble_return_lock_off_result(u8 result);
+extern void ble_return_aes_password_update_result(u8 result);
 /**************************************************************************/
 /////////////////////////////// HemiaoLock concerned ///////////////////////////////////////////
 u32 g_current_time;

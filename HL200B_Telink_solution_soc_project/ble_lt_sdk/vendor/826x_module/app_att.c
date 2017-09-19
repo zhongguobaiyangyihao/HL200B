@@ -54,6 +54,7 @@ static u8 	indCharCfg[6] = {0x0b, 0x00, 0x02, 0x29};
 const u16 	userdesc_UUID		= GATT_UUID_CHAR_USER_DESC;
 
 static nv_params_t  ble_nv_params;;
+static u8           ble_aes_key[16];
 
 #define 	DEV_NAME                       			"TNLKLock"
 extern u8  	ble_devName[];
@@ -460,7 +461,7 @@ void ble_return_aes_password_update_result(u8 result)
 	modify_key_ack->tokenack2 = 0x01;
 	modify_key_ack->RET = result;//RET 为状态返回，00 表示修改密钥成功，01 表示修改密钥失败;
 	printf("rsponse data: ");foreach(i, 16){PrintHex(*((u8*)modify_key_ack+i));}printf("\r\n");
-	AES_ECB_Encryption(nv_params_ptr->AES_Key, (u8*)modify_key_ack, encrypted_data);
+	AES_ECB_Encryption(ble_aes_key, (u8*)modify_key_ack, encrypted_data);
 	bls_att_pushNotifyData(BleLockChar2DataHdl, encrypted_data, 16);
 }
 /************************************************************
@@ -994,16 +995,17 @@ int sprocomm_lock_write_evt_handler(rf_packet_att_write_t *p)
 			{
 				printf("MODIFY_AES_PASSWORD_CMD1.\r\n");
 				memcpy(&ble_nv_params,nv_params_ptr,sizeof(nv_params_t));
+				memcpy(ble_aes_key,nv_params_ptr->AES_Key,sizeof(ble_aes_key));
 				memcpy(ble_nv_params.AES_Key,(decrypted_data+3),8);//KEYL 为新密钥前 8 个字节
 				aes_password_msb_no_received = 0;
-				//,KEYH 为新密钥后 8 个字节，密钥字节按照小端模式排列。
 				break;
 			}
 			case MODIFY_AES_PASSWORD_CMD2://0x07 02
 			{
 				printf("MODIFY_AES_PASSWORD_CMD2.\r\n");
-				if(!aes_password_msb_no_received)
+				if(!aes_password_msb_no_received)//,KEYH 为新密钥后 8 个字节，密钥字节按照小端模式排列。
 				{
+					memcpy(&ble_nv_params.AES_Key[8],(decrypted_data+3),8);
 					Flag.is_aes_password_update = 1;
 				}
 				aes_password_msb_no_received = 1;
