@@ -54,8 +54,17 @@ typedef struct
 {
 	u8  reserved0                     : 1;
 	u8  reserved1                     : 1;
+	u8  reserved2                     : 1;
+	u8  reserved3                     : 1;
+	u8  reserved4                     : 1;
+	u8  is_lockon_by_order            : 1;
+	u8  is_turnon_lock_order_via_ble  : 1;
+	u8  is_turnon_lock_serial_number_via_ble   : 1;
+
+	u8  is_aes_password_update        : 1;
 	u8  is_lockon_password_update     : 1;
 	u8  is_turnon_lock_via_ble        : 1;
+	u8  is_lockoff_occur              : 1;
 	u8  is_lockoff_event_occur        : 1;
 	u8  is_return_domain_via_ble      : 1;
 	u8  is_module_excute              : 1;

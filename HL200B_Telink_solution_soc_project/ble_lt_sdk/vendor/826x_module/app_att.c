@@ -79,7 +79,8 @@ extern u8   g_lock_ICCID[LOCK_ICCID_LEN];
 extern u8   g_lock_IMEI[LOCK_IMEI_LEN];
 extern u8   g_lock_SN[LOCK_SN_LEN];
 extern u8   g_lock_domains[LOCK_DOMAIN_LEN];
-extern u8   g_is_order_num_unlock;
+extern u8   g_order[108];
+extern u8   g_order_number;
 extern Flag_t Flag;
 extern device_state_t device_state;
 extern BJ_Time_t BJ_Time;
@@ -88,6 +89,7 @@ extern nv_params_t *nv_params_ptr;
 extern void AES_ECB_Encryption(u8 *key, u8 *plaintext, u8 *encrypted_data);
 extern void AES_ECB_Decryption(u8 *key, u8 *encrypted_data, u8 *decrypted_data);
 extern BJ_Time_t get_RTC_value(void);
+extern void swapX(const u8 *src, u8 *dst, int len);
 
 
 
@@ -208,7 +210,8 @@ typedef struct
 }get_lock_work_pattern_ack_t;
 
 //设置锁的工作模式指令后返回： 05 21 01  FILL[12]
-typedef struct{
+typedef struct
+{
 	u8 tokenack0;    //05
 	u8 tokenack1;	 //21
 	u8 tokenack2;	 //01
@@ -287,7 +290,8 @@ typedef struct
 //////////////////////////////////////////////////////////////
 
 //查询锁的 GSM ID指令后返回： 05 23 06 ID[6]  FILL[7]
-typedef struct{
+typedef struct
+{
 	u8 tokenack0;    //05
 	u8 tokenack1;	 //23
 	u8 tokenack2;	 //06
@@ -339,7 +343,8 @@ typedef struct
 }get_lock_domains_ack_t;
 
 //开锁指令后返回： 05 02 01 RET TL YY YY MM DD HH mm ss FILL[4]
-typedef struct{
+typedef struct
+{
 	u8 tokenack0;    //05
 	u8 tokenack1;	 //02
 	u8 tokenack2;	 //01
@@ -349,8 +354,21 @@ typedef struct{
 	u8 rsvd[4];
 }open_lock_ack_t;
 
+//关锁指令后返回： 05 08 01 RET TL YY YY MM DD HH mm ss FILL[4]
+typedef struct
+{
+	u8 tokenack0;    //05
+	u8 tokenack1;	 //08
+	u8 tokenack2;	 //01
+	u8 RET;          //RET 为状态返回，00 表示关锁成功，01 表示关锁失败
+	u8 tl;           //TL为时间长度，其中年份占2个字节，其余月日时分秒各一个字节
+	BJ_Time_t rtc;
+	u8 rsvd[4];
+}close_lock_ack_t;
+
 //流水号开锁指令后返回： 05 32 01 RET FILL[12]
-typedef struct{
+typedef struct
+{
 	u8 tokenack0;    //05
 	u8 tokenack1;	 //32
 	u8 tokenack2;	 //01
@@ -359,7 +377,8 @@ typedef struct{
 }serial_number_lock_ack_t;
 
 //订单号开锁指令后返回： 05 13 01 RET TL YY YY MM DD HH mm ss FILL[4]
-typedef struct{
+typedef struct
+{
 	u8 tokenack0;    //05
 	u8 tokenack1;	 //13
 	u8 tokenack2;	 //01
@@ -375,7 +394,8 @@ typedef struct{
 //transmit2: 05 15 T CI ORDER[12]
 //transmit3: 05 15 T CI ORDER[?]
 //...根据订单号长度定
-typedef struct{
+typedef struct
+{
 	u8 tokenack0;    //05
 	u8 tokenack1;	 //14
 	u8 tokenack2;	 //01
@@ -384,7 +404,8 @@ typedef struct{
 	BJ_Time_t rtc;
 	u8 rsvd[4];
 }order_num_lock_send1_t;
-typedef struct{
+typedef struct
+{
 	u8 tokenack0;    //05
 	u8 tokenack1;	 //15
 	u8 T;            //T为订单号总长度
@@ -394,7 +415,8 @@ typedef struct{
 /////////////////////////////////////////////////////////////////////////////////////////////
 
 //修改密码指令后返回： 05 05 01 RET FILL[12]
-typedef struct{
+typedef struct
+{
 	u8 tokenack0;    //05
 	u8 tokenack1;	 //05
 	u8 tokenack2;	 //01
@@ -403,71 +425,15 @@ typedef struct{
 }modify_pwd_ack_t;
 
 //修改密钥指令后返回： 07 03 01 RET FILL[12]
-typedef struct{
+typedef struct
+{
 	u8 tokenack0;    //07
 	u8 tokenack1;	 //03
 	u8 tokenack2;	 //01
 	u8 RET;          //RET 为状态返回，00 表示修改密钥成功，01 表示修改密钥失败
 	u8 rsvd[12];
 }modify_key_ack_t;
-
-
-u8 order[24];//单号缓存数组24byts,根据实际修改
-u8 order_len;
-u8 tmp_order_len;
-
-
-//订单号开锁后再进行手动关锁，锁自动发送包含订单号的通信帧。锁返回通信帧：
-u8 order_num_lock_notify2master(void){
-	u8 encrypted_data[16];
-	if(g_is_order_num_unlock){
-		g_is_order_num_unlock = 0;
-
-		order_num_lock_send1_t order_num_lock_send1;
-		order_num_lock_send1.tokenack0 = 0x05;
-		order_num_lock_send1.tokenack1 = 0x14;
-		order_num_lock_send1.tokenack2 = 0x01;
-		//TODO:实际电机控制锁关闭后，需要立即更新全局变量g_curr_lock_state
-		order_num_lock_send1.tl = 7; //TL为时间长度，其中年份占2个字节，其余月日时分秒各一个字节。
-		order_num_lock_send1.RET = device_state.lock_onoff_state;//RET 为状态返回，00 表示关锁成功，01 表示关锁失败
-		order_num_lock_send1.rtc = GET_RTC_VAL();
-
-		//send cmd1 data
-		AES_ECB_Encryption(nv_params_ptr->AES_Key, (u8*)&order_num_lock_send1, encrypted_data);
-		bls_att_pushNotifyData(BleLockChar2DataHdl, encrypted_data, 16);
-
-		//send left data
-		order_num_lock_send2_t order_num_lock_send2;
-		order_num_lock_send2.tokenack0 = 0x05;
-		order_num_lock_send2.tokenack1 = 0x15;
-		order_num_lock_send2.T = tmp_order_len;//T为订单号总长度
-
-		s8 notify_cnt = tmp_order_len/12;
-		u8 left_notify_cnt = tmp_order_len%12;
-		u8 send_cnt = 0;
-
-		do{
-			memset(order_num_lock_send2.order, 0, 12);
-			order_num_lock_send2.CI = send_cnt;
-			memcpy(order_num_lock_send2.order, order+(send_cnt*12), tmp_order_len > 12 ? 12 : tmp_order_len);
-			AES_ECB_Encryption(nv_params_ptr->AES_Key, (u8*)&order_num_lock_send1, encrypted_data);
-			bls_att_pushNotifyData(BleLockChar2DataHdl, encrypted_data, 16);
-			send_cnt++;
-		}while((--notify_cnt) > 0);
-
-		if(left_notify_cnt){
-			memset(order_num_lock_send2.order, 0, 12);
-			order_num_lock_send2.CI = send_cnt;
-			memcpy(order_num_lock_send2.order, order+(send_cnt*12), left_notify_cnt);
-			AES_ECB_Encryption(nv_params_ptr->AES_Key, (u8*)&order_num_lock_send2, encrypted_data);
-			bls_att_pushNotifyData(BleLockChar2DataHdl, encrypted_data, 16);
-		}
-		return 1;
-	}
-	return 0;
-}
-
-
+/*************************************************************************/
 int hemiaolock_read(void * p)
 {
 	u8 encrypted_data[16] = {0xaa, 0xbb, 0xdd};
@@ -482,11 +448,20 @@ nv_params_t *ble_update_nv_params_ptr_inquiry(void)
 	return (&ble_nv_params);
 }
 /************************************************************
-ble_update_lockon_password
+ble_return_aes_password_update_result
 ************************************************************/
-static void ble_update_lockon_password(void)
+void ble_return_aes_password_update_result(u8 result)
 {
-	Flag.is_lockon_password_update = 1;
+	u8 tmp_buffer[20];
+	u8 encrypted_data[16];//S->M encryption
+	modify_key_ack_t* modify_key_ack = (modify_key_ack_t*)tmp_buffer;
+	modify_key_ack->tokenack0 = 0x07;
+	modify_key_ack->tokenack1 = 0x03;
+	modify_key_ack->tokenack2 = 0x01;
+	modify_key_ack->RET = result;//RET 为状态返回，00 表示修改密钥成功，01 表示修改密钥失败;
+	printf("rsponse data: ");foreach(i, 16){PrintHex(*((u8*)modify_key_ack+i));}printf("\r\n");
+	AES_ECB_Encryption(nv_params_ptr->AES_Key, (u8*)modify_key_ack, encrypted_data);
+	bls_att_pushNotifyData(BleLockChar2DataHdl, encrypted_data, 16);
 }
 /************************************************************
 ble_return_lock_on_result
@@ -518,9 +493,118 @@ void ble_return_lock_on_result(u8 result)
 	open_lock_ack->RET = result;//RET 为状态返回，00 表示开锁成功，01 表示开锁失败。
 	open_lock_ack->tl = 7;//TL为时间长度，其中年份占2个字节，其余月日时分秒各一个字节
 	open_lock_ack->rtc = BJ_Time;
+	swapX(&BJ_Time.year,&open_lock_ack->rtc.year,2);
 	printf("rsponse data: ");foreach(i, 16){PrintHex(*((u8*)open_lock_ack+i));}printf("\r\n");
 	AES_ECB_Encryption(nv_params_ptr->AES_Key, (u8*)open_lock_ack, encrypted_data);
 	bls_att_pushNotifyData(BleLockChar2DataHdl, encrypted_data, 16);
+}
+/************************************************************
+ble_return_lock_on_result
+************************************************************/
+void ble_return_lock_on_result_serial_number(u8 result)
+{
+	u8 tmp_buffer[20];
+	u8 encrypted_data[16];//S->M encryption
+
+	serial_number_lock_ack_t* serial_number_lock_ack = (serial_number_lock_ack_t*)tmp_buffer;
+	serial_number_lock_ack->tokenack0 = 0x05;
+	serial_number_lock_ack->tokenack1 = 0x32;
+	serial_number_lock_ack->tokenack2 = 0x01;
+	//TODO: 获取开锁成功or失败的信息
+	serial_number_lock_ack->RET = result;//RET 为状态返回，00 表示开锁成功，01 表示开锁失败。
+	printf("rsponse data: ");foreach(i, 16){PrintHex(*((u8*)serial_number_lock_ack+i));}printf("\r\n");
+	AES_ECB_Encryption(nv_params_ptr->AES_Key, (u8*)serial_number_lock_ack, encrypted_data);
+	bls_att_pushNotifyData(BleLockChar2DataHdl, encrypted_data, 16);
+}
+/************************************************************
+ble_return_lock_on_result_order
+************************************************************/
+void ble_return_lock_on_result_order(u8 result)
+{
+	u8 tmp_buffer[20];
+	u8 encrypted_data[16];//S->M encryption
+	order_num_unlock_ack_t* order_num_unlock_ack = (order_num_unlock_ack_t*)tmp_buffer;
+	order_num_unlock_ack->tokenack0 = 0x05;
+	order_num_unlock_ack->tokenack1 = 0x13;
+	order_num_unlock_ack->tokenack2 = 0x01;
+	order_num_unlock_ack->RET = result;//RET 为状态返回，00 表示开锁成功，01 表示开锁失败。
+	order_num_unlock_ack->tl = 7;//TL为时间长度，其中年份占2个字节，其余月日时分秒各一个字节
+	order_num_unlock_ack->rtc = BJ_Time;
+	swapX(&BJ_Time.year,&order_num_unlock_ack->rtc.year,2);
+	printf("rsponse data: ");foreach(i, 16){PrintHex(*((u8*)order_num_unlock_ack+i));}printf("\r\n");
+	AES_ECB_Encryption(nv_params_ptr->AES_Key, (u8*)order_num_unlock_ack, encrypted_data);
+	bls_att_pushNotifyData(BleLockChar2DataHdl, encrypted_data, 16);
+}
+/************************************************************
+ble_return_lock_off_result
+************************************************************/
+void ble_return_lock_off_result(u8 result)
+{
+	u8 tmp_buffer[20];
+	u8 encrypted_data[16];//S->M encryption
+
+	close_lock_ack_t* close_lock_ack = (close_lock_ack_t*)tmp_buffer;
+	close_lock_ack->tokenack0 = 0x05;
+	close_lock_ack->tokenack1 = 0x08;
+	close_lock_ack->tokenack2 = 0x01;
+	close_lock_ack->RET = result;//RET 为状态返回，00 表示关锁成功，01 表示关锁失败。
+	close_lock_ack->tl = 7;//TL为时间长度，其中年份占2个字节，其余月日时分秒各一个字节
+	close_lock_ack->rtc = BJ_Time;
+	swapX(&BJ_Time.year,&close_lock_ack->rtc.year,2);
+	printf("rsponse data: ");foreach(i, 16){PrintHex(*((u8*)close_lock_ack+i));}printf("\r\n");
+	AES_ECB_Encryption(nv_params_ptr->AES_Key, (u8*)close_lock_ack, encrypted_data);
+	bls_att_pushNotifyData(BleLockChar2DataHdl, encrypted_data, 16);
+}
+/************************************************************
+ble_return_lock_off_result_order
+************************************************************/
+void ble_return_lock_off_result_order(u8 result)
+{
+	u8 current_index = 0;
+	u8 total_index = (g_order_number+11)/12;
+	u8 current_transmiting[12];
+	u8 encrypted_data[16];//S->M encryption
+	u32 start_tick;
+
+	order_num_lock_send1_t order_num_lock_send1;
+	order_num_lock_send1.tokenack0 = 0x05;
+	order_num_lock_send1.tokenack1 = 0x14;
+	order_num_lock_send1.tokenack2 = 0x01;
+	order_num_lock_send1.tl = 7; //TL为时间长度，其中年份占2个字节，其余月日时分秒各一个字节。
+	order_num_lock_send1.RET = result;//RET 为状态返回，00 表示关锁成功，01 表示关锁失败
+	order_num_lock_send1.rtc = BJ_Time;
+	swapX(&BJ_Time.year,&order_num_lock_send1.rtc.year,2);
+	//send cmd1 data
+	printf("rsponse data: ");foreach(i, 16){PrintHex(*((u8*)&order_num_lock_send1+i));}printf("\r\n");
+	AES_ECB_Encryption(nv_params_ptr->AES_Key, (u8*)&order_num_lock_send1, encrypted_data);
+	bls_att_pushNotifyData(BleLockChar2DataHdl, encrypted_data, 16);
+
+	start_tick = clock_time();
+	while(!clock_time_exceed(start_tick,10*1000));
+
+	//send left data
+	order_num_lock_send2_t order_num_lock_send2;
+	for(;current_index<total_index;current_index++)
+	{
+		memset(current_transmiting,0,sizeof(current_transmiting));
+		if(current_index == (total_index-1))
+			memcpy(current_transmiting,(g_order+current_index*12),(g_order_number-current_index*12));
+		else
+			memcpy(current_transmiting,(g_order+current_index*12),sizeof(current_transmiting));
+		order_num_lock_send2.tokenack0 = 0x05;
+		order_num_lock_send2.tokenack1 = 0x15;
+		order_num_lock_send2.T = g_order_number;//T为订单号总长度
+		order_num_lock_send2.CI = current_index;
+		memcpy(order_num_lock_send2.order, current_transmiting, 12);
+		printf("rsponse data: ");foreach(i, 16){PrintHex(*((u8*)&order_num_lock_send2+i));}printf("\r\n");
+		AES_ECB_Encryption(nv_params_ptr->AES_Key, (u8*)&order_num_lock_send2, encrypted_data);
+		bls_att_pushNotifyData(BleLockChar2DataHdl, encrypted_data, 16);
+		if(current_index != (total_index-1))
+		{
+			start_tick = clock_time();
+			while(!clock_time_exceed(start_tick,10*1000));
+		}
+	}
 }
 /************************************************************
 ble_return_domain_operation
@@ -579,10 +663,12 @@ int sprocomm_lock_write_evt_handler(rf_packet_att_write_t *p)
 	u8 encrypted_data[16];//S->M encryption
 	u16 cmdOpCode;
 	u8 cmd_len = 4;//default 4ytes bcmd
-	static u8 continue_cmd_flg;
 	static u8 order_transmit_seq;
 	static u8 cnt;
 	static u8 old_password_check_reslult_fail = 1;//check fail
+	static u8 aes_password_msb_no_received = 1;
+	static u8 order_lockon_check_fail = 1;
+	static u8 order_current_number = 0;
 	if(len == 16)
 	{   //HemiaoLock data length id fixed as 16 bytes
 
@@ -597,6 +683,8 @@ int sprocomm_lock_write_evt_handler(rf_packet_att_write_t *p)
 			{
 				//new connect init params
 				old_password_check_reslult_fail = 1;
+				aes_password_msb_no_received = 1;
+				order_lockon_check_fail = 1;
 
 				printf("GET_LOCK_TOKEN_CMD.\r\n");
 				token_packet_ack_t* token_ack = (token_packet_ack_t*)p;
@@ -761,7 +849,6 @@ int sprocomm_lock_write_evt_handler(rf_packet_att_write_t *p)
 			{
 				if(!gap_check_token_is_met(decrypted_data+9))
 				{
-					printf("token is 0x%x  0x%x  0x%x  0x%x.\r\n",(*(u8 *)(decrypted_data+9)),(*(u8 *)(decrypted_data+10)),(*(u8 *)(decrypted_data+11)),(*(u8 *)(decrypted_data+12)));
 					break;
 				}
 				printf("OPEN_THE_LOCK_CMD.\r\n");
@@ -780,13 +867,34 @@ int sprocomm_lock_write_evt_handler(rf_packet_att_write_t *p)
 				if(device_state.lock_onoff_state == lock_onoff_state_on)
 				{
 					printf("LOCK is on state.\r\n");
-					ble_return_lock_on_result(0);
+					ble_return_lock_on_result((device_state.lock_onoff_state == lock_onoff_state_on)?0:1);
 				}
 				else
 				{
 					printf("LOCK is open....\r\n");
 				    Flag.is_turnon_lock_via_ble = 1;
 				}
+				break;
+			}
+		    case CLOSE_THE_LOCK_CMD: //0x05 0x0C
+			{
+				if(!gap_check_token_is_met(decrypted_data+4))
+				{
+					break;
+				}
+				printf("CLOSE_THE_LOCK_CMD.\r\n");
+
+				close_lock_ack_t* close_lock_ack = (close_lock_ack_t*)p;
+				close_lock_ack->tokenack0 = 0x05;
+				close_lock_ack->tokenack1 = 0x08;
+				close_lock_ack->tokenack2 = 0x01;
+				close_lock_ack->RET = ((device_state.lock_onoff_state == lock_onoff_state_off)?0:1);//RET 为状态返回，00 表示关锁成功，01 表示关锁失败。
+				close_lock_ack->tl = 7;//TL为时间长度，其中年份占2个字节，其余月日时分秒各一个字节
+				close_lock_ack->rtc = BJ_Time;
+				swapX(&BJ_Time.year,&close_lock_ack->rtc.year,2);
+				printf("rsponse data: ");foreach(i, 16){PrintHex(*((u8*)close_lock_ack+i));}printf("\r\n");
+				AES_ECB_Encryption(nv_params_ptr->AES_Key, (u8*)close_lock_ack, encrypted_data);
+				bls_att_pushNotifyData(BleLockChar2DataHdl, encrypted_data, 16);
 				break;
 			}
 		    case SET_CURRENT_TIME_CMD://0x06 03
@@ -829,7 +937,7 @@ int sprocomm_lock_write_evt_handler(rf_packet_att_write_t *p)
 				bls_att_pushNotifyData(BleLockChar2DataHdl, encrypted_data, 16);
 				break;
 			}
-		    case CHANGE_PASSWORD_CMD1://0x05 03
+		    case MODIFY_LOCKON_PASSWORD_CMD1://0x05 03
 			{
 				if(!gap_check_token_is_met(decrypted_data+9))
 				{
@@ -855,7 +963,7 @@ int sprocomm_lock_write_evt_handler(rf_packet_att_write_t *p)
 				}
 				break;
 			}
-			case CHANGE_PASSWORD_CMD2://0x05 04
+			case MODIFY_LOCKON_PASSWORD_CMD2://0x05 04
 			{
 				if(!gap_check_token_is_met(decrypted_data+9))
 				{
@@ -878,66 +986,92 @@ int sprocomm_lock_write_evt_handler(rf_packet_att_write_t *p)
 				{
 					memcpy(&ble_nv_params,nv_params_ptr,sizeof(nv_params_t));
 					memcpy(ble_nv_params.lock_on_pwd,(decrypted_data+3),sizeof(ble_nv_params.lock_on_pwd));
-					ble_update_lockon_password();
+					Flag.is_lockon_password_update = 1;
 				}
 				break;
 			}
-			default:
+			case MODIFY_AES_PASSWORD_CMD1://0x07 01
 			{
+				printf("MODIFY_AES_PASSWORD_CMD1.\r\n");
+				memcpy(&ble_nv_params,nv_params_ptr,sizeof(nv_params_t));
+				memcpy(ble_nv_params.AES_Key,(decrypted_data+3),8);//KEYL 为新密钥前 8 个字节
+				aes_password_msb_no_received = 0;
+				//,KEYH 为新密钥后 8 个字节，密钥字节按照小端模式排列。
 				break;
 			}
-		}
-#if 0
-		memcpy((u8*)&cmdOpCode, decrypted_data, 4);
-		memset((void*)p, 0, sizeof(rf_packet_att_write_t));
-		printf("|    decrypted_data: ");foreach(i, 16){PrintHex(*((u8*)decrypted_data+i));}printf("|\r\n");
-		/////////////////////////////////// 4字节命令解析 /////////////////////////////////////////
-		switch(CMD_LEN4BYTES(cmdOpCode))
-		{
-			case GET_LOCK_TOKEN_CMD://get Token CMD
+			case MODIFY_AES_PASSWORD_CMD2://0x07 02
 			{
-				printf("GET_LOCK_TOKEN_CMD.\r\n");
-				token_packet_ack_t* token_ack = (token_packet_ack_t*)p;
-				token_ack->tokenack0 = 0x06;
-				token_ack->tokenack1 = 0x02;
-				token_ack->len = 0x09;
-				token_ack->curToken = g_session_id;
-				token_ack->chipType = 0x01;
-				token_ack->ver_major = (VER&0xF0)>>4;
-				token_ack->ver_minor = (VER&0x0F);
-				token_ack->productID_IDL = IDL;
-				token_ack->productID_IDH = IDH;
-				printf("|    rsponse data: ");foreach(i, 16){PrintHex(*((u8*)token_ack+i));}printf("|\n");
-				AES_ECB_Encryption(nv_params_ptr->AES_Key, (u8*)token_ack, encrypted_data);
+				printf("MODIFY_AES_PASSWORD_CMD2.\r\n");
+				if(!aes_password_msb_no_received)
+				{
+					Flag.is_aes_password_update = 1;
+				}
+				aes_password_msb_no_received = 1;
+				break;
+			}
+			case SET_RETURN_CAR_STATUS_CMD://0x05 14
+			{
+				if(!gap_check_token_is_met(decrypted_data+4))
+				{
+					break;
+				}
+				printf("SET_RETURN_CAR_STATUS_CMD.\r\n");
+				set_return_car_status_ack_t* set_return_car_status_ack = (set_return_car_status_ack_t*)p;
+				set_return_car_status_ack->tokenack0 = 0x05;
+				set_return_car_status_ack->tokenack1 = 0x15;
+				set_return_car_status_ack->tokenack2 = 0x01;
+				set_return_car_status_ack->RET = 0x00;//RET 为状态返回，00 表示设置成功，01 表示设置失败
+				printf("rsponse data: ");foreach(i, 16){PrintHex(*((u8*)set_return_car_status_ack+i));}printf("\r\n");
+				AES_ECB_Encryption(nv_params_ptr->AES_Key, (u8*)set_return_car_status_ack, encrypted_data);
 				bls_att_pushNotifyData(BleLockChar2DataHdl, encrypted_data, 16);
 				break;
 			}
-			case GET_LOCK_TIME_CMD://Query lock time
+			case SET_LOCK_WORK_PATTERN_CMD://0x05 21
 			{
-				printf("GET_LOCK_TIME_CMD.\n");
-				//u32 get_token =  MAKE_U32(decrypted_data[7], decrypted_data[6], decrypted_data[5], decrypted_data[4]);
-
-				//if(g_session_id == get_token){//? 关锁的时候，如果连接是断开的，那么主机无法正常收到关锁通知，这时可以主动去查询最后一次关锁的时间??
-					query_lock_time_ack_t* query_lock_time_ack = (query_lock_time_ack_t*)p;
-					query_lock_time_ack->tokenack0 = 0x06;
-					query_lock_time_ack->tokenack1 = 0x06;
-					query_lock_time_ack->tokenack2 = 0x06;
-					query_lock_time_ack->serialNum = g_serialNum;
-					query_lock_time_ack->lastLockTime = g_locked_time;
-
-					AES_ECB_Encryption(nv_params_ptr->AES_Key, (u8*)query_lock_time_ack, encrypted_data);
-					bls_att_pushNotifyData(BleLockChar2DataHdl, encrypted_data, 16);
-				//}
+				if(!gap_check_token_is_met(decrypted_data+4))
+				{
+					break;
+				}
+				printf("SET_LOCK_WORK_PATTERN_CMD.\n");
+				memcpy(&g_curr_lock_work_pattern, decrypted_data+3, 1);//MOD 为锁工作模式，00 表示正常模式，01 表示运输模式，02 表示锁重启。
+				if(g_curr_lock_work_pattern == 0x02)
+				{
+					cpu_reboot();
+				}
+				set_lock_work_pattern_ack_t* set_lock_work_pattern_ack = (set_lock_work_pattern_ack_t*)p;
+				set_lock_work_pattern_ack->tokenack0 = 0x05;
+				set_lock_work_pattern_ack->tokenack1 = 0x21;
+				set_lock_work_pattern_ack->tokenack2 = 0x01;
+				set_lock_work_pattern_ack->RET = 0x00;//RET 为状态返回，00 表示设置成功，01 表示设置失败。
+				printf("rsponse data: ");foreach(i, 16){PrintHex(*((u8*)set_lock_work_pattern_ack+i));}printf("\r\n");
+				AES_ECB_Encryption(nv_params_ptr->AES_Key, (u8*)set_lock_work_pattern_ack, encrypted_data);
+				bls_att_pushNotifyData(BleLockChar2DataHdl, encrypted_data, 16);
+				break;
 			}
-			break;
-
-			case GET_INT_EXT_ELECTRICITY_CMD: //Get internal and external electricity
+			case GET_INT_EXT_ELECTRICITY_CMD: //0x02 01 01 01/02
 			{
-				printf("GET_INT_EXT_ELECTRICITY_CMD.\n");
-
-				//u32 get_token =  MAKE_U32(decrypted_data[7], decrypted_data[6], decrypted_data[5], decrypted_data[4]);
-
-				//if(g_session_id == get_token){//?
+				if(!gap_check_token_is_met(decrypted_data+4))
+				{
+					break;
+				}
+				if(*((u8*)(decrypted_data+3)) == 1)
+				{
+					printf("GET_BATTERY_VOLTAGE_TEMPERATURE_CMD.\r\n");
+					get_int_ext_electricity_ack_t* get_int_ext_electricity_ack = (get_int_ext_electricity_ack_t*)p;
+					get_int_ext_electricity_ack->tokenack0 = 0x02;
+					get_int_ext_electricity_ack->tokenack1 = 0x02;
+					get_int_ext_electricity_ack->tokenack2 = 0x01;
+					get_int_ext_electricity_ack->vl = 2;//电压值volt的长度,这里默认2
+					get_int_ext_electricity_ack->volt = g_curr_vol;
+					get_int_ext_electricity_ack->tl = 2;//温度值temp的长度,这里默认2
+					get_int_ext_electricity_ack->temp = g_curr_temp;
+					printf("rsponse data: ");foreach(i, 16){PrintHex(*((u8*)get_int_ext_electricity_ack+i));}printf("\r\n");
+					AES_ECB_Encryption(nv_params_ptr->AES_Key, (u8*)get_int_ext_electricity_ack, encrypted_data);
+					bls_att_pushNotifyData(BleLockChar2DataHdl, encrypted_data, 16);
+				}
+				else if(*((u8*)(decrypted_data+3)) == 2)
+				{
+					printf("GET_INT_EXT_ELECTRICITY_CMD.\r\n");
 					get_int_ext_electricity_ack_t* get_int_ext_electricity_ack = (get_int_ext_electricity_ack_t*)p;
 					get_int_ext_electricity_ack->tokenack0 = 0x02;
 					get_int_ext_electricity_ack->tokenack1 = 0x02;
@@ -948,451 +1082,88 @@ int sprocomm_lock_write_evt_handler(rf_packet_att_write_t *p)
 					get_int_ext_electricity_ack->temp = g_curr_temp;
 					get_int_ext_electricity_ack->cl = 2;//充电电压charge的长度,这里默认2
 					get_int_ext_electricity_ack->charge = g_curr_charge_vol;
+					printf("rsponse data: ");foreach(i, 16){PrintHex(*((u8*)get_int_ext_electricity_ack+i));}printf("\r\n");
 					AES_ECB_Encryption(nv_params_ptr->AES_Key, (u8*)get_int_ext_electricity_ack, encrypted_data);
 					bls_att_pushNotifyData(BleLockChar2DataHdl, encrypted_data, 16);
-				//}
-			}
-			break;
-
-			case GET_LOCK_STATUS_CMD://Query lock status
-			{
-				printf("GET_LOCK_STATUS_CMD.\n");
-
-				//u32 get_token =  MAKE_U32(decrypted_data[7], decrypted_data[6], decrypted_data[5], decrypted_data[4]);
-
-				//if(g_session_id == get_token){//?
-					query_lock_status_ack_t* query_lock_status_ack = (query_lock_status_ack_t*)p;
-					query_lock_status_ack->tokenack0 = 0x05;
-					query_lock_status_ack->tokenack1 = 0x0f;
-					query_lock_status_ack->tokenack2 = 0x01;
-					query_lock_status_ack->sta = g_curr_lock_state;//STA 为锁状态，00 表示开启状态，01 表示关闭状态。
-					AES_ECB_Encryption(nv_params_ptr->AES_Key, (u8*)query_lock_status_ack, encrypted_data);
-					bls_att_pushNotifyData(BleLockChar2DataHdl, encrypted_data, 16);
-				//}
-			}
-			break;
-
-			case SET_RETURN_CAR_CONDITION_CMD://set return car condition
-			{
-				printf("SET_RETURN_CAR_CONDITION_CMD.\n");
-
-				//u32 get_token =  MAKE_U32(decrypted_data[7], decrypted_data[6], decrypted_data[5], decrypted_data[4]);
-
-				//if(g_session_id == get_token){//?
-					set_return_car_status_ack_t* set_return_car_status_ack = (set_return_car_status_ack_t*)p;
-					set_return_car_status_ack->tokenack0 = 0x05;
-					set_return_car_status_ack->tokenack1 = 0x15;
-					set_return_car_status_ack->tokenack2 = 0x01;
-					set_return_car_status_ack->RET = 0x00;//RET 为状态返回，00 表示设置成功，01 表示设置失败
-					AES_ECB_Encryption(nv_params_ptr->AES_Key, (u8*)set_return_car_status_ack, encrypted_data);
-					bls_att_pushNotifyData(BleLockChar2DataHdl, encrypted_data, 16);
-				//}
-			}
-			break;
-
-			case GET_LOCK_WORK_PATTERN_CMD://Query lock work pattern
-			{
-				printf("GET_LOCK_WORK_PATTERN_CMD.\n");
-
-				//u32 get_token =  MAKE_U32(decrypted_data[7], decrypted_data[6], decrypted_data[5], decrypted_data[4]);
-
-				//if(g_session_id == get_token){//?
-					get_lock_work_pattern_ack_t* get_lock_work_pattern_ack = (get_lock_work_pattern_ack_t*)p;
-					get_lock_work_pattern_ack->tokenack0 = 0x05;
-					get_lock_work_pattern_ack->tokenack1 = 0x20;
-					get_lock_work_pattern_ack->tokenack2 = 0x01;
-					get_lock_work_pattern_ack->MOD = g_curr_lock_work_pattern;//MOD 为锁工作模式，00 表示正常模式，01 表示运输模式
-					AES_ECB_Encryption(nv_params_ptr->AES_Key, (u8*)get_lock_work_pattern_ack, encrypted_data);
-					bls_att_pushNotifyData(BleLockChar2DataHdl, encrypted_data, 16);
-				//}
-			}
-			break;
-
-			case GET_LOCK_WORKING_STATUS_CMD://Inquire about the working state of the lock
-			{
-				printf("GET_LOCK_WORKING_STATUS_CMD.\n");
-
-				//u32 get_token =  MAKE_U32(decrypted_data[7], decrypted_data[6], decrypted_data[5], decrypted_data[4]);
-
-				//if(g_session_id == get_token){//?
-					get_lock_work_status_ack_t* get_lock_work_status_ack = (get_lock_work_status_ack_t*)p;
-					get_lock_work_status_ack->tokenack0 = 0x05;
-					get_lock_work_status_ack->tokenack1 = 0x22;
-					get_lock_work_status_ack->tokenack2 = 0x08;
-					get_lock_work_status_ack->R.R0.lock_switch_status = g_curr_lock_state;
-					get_lock_work_status_ack->R.R0.vib_func = g_curr_status_vib_func;
-					get_lock_work_status_ack->R.R0.vib_state = g_curr_status_vib_status;
-					get_lock_work_status_ack->R.R0.chg_dischg_state = g_curr_chg_dischg_state;
-					get_lock_work_status_ack->R.R1_GSM_status = g_GSM_status;
-					get_lock_work_status_ack->R.R2_last_GPRS_online_need_time = g_last_GPRS_online_need_time;
-					get_lock_work_status_ack->R.R3_last_GPRS_rssi_val = g_last_GPRS_rssi_val;
-					get_lock_work_status_ack->R.R4_GPS_status = g_GPS_status;
-					get_lock_work_status_ack->R.R5_last_GPS_location_need_time = g_last_GPS_location_need_time;
-					get_lock_work_status_ack->R.R6_last_GPS_stars_received_num = g_last_GPS_stars_received_num;
-					get_lock_work_status_ack->vl = 2;//电压值volt的长度,这里默认2
-					get_lock_work_status_ack->volt = g_curr_vol;
-					get_lock_work_status_ack->tl = 2;//温度值temp的长度,这里默认2
-					get_lock_work_status_ack->temp = g_curr_temp;
-					AES_ECB_Encryption(nv_params_ptr->AES_Key, (u8*)get_lock_work_status_ack, encrypted_data);
-					bls_att_pushNotifyData(BleLockChar2DataHdl, encrypted_data, 16);
-				//}
-			}
-			break;
-
-			case GET_LOCK_GSM_ID_CMD://Query lock domains
-			{
-				printf("GET_LOCK_GSM_ID_CMD.\n");
-
-				//u32 get_token =  MAKE_U32(decrypted_data[7], decrypted_data[6], decrypted_data[5], decrypted_data[4]);
-
-				//if(g_session_id == get_token){//?
-					get_GSM_ID_ack_t* get_GSM_ID_ack = (get_GSM_ID_ack_t*)p;
-					get_GSM_ID_ack->tokenack0 = 0x05;
-					get_GSM_ID_ack->tokenack1 = 0x23;
-					get_GSM_ID_ack->tokenack2 = 0x06;
-					memcpy(get_GSM_ID_ack->GSM_ID, g_GSM_ID, 6);
-					AES_ECB_Encryption(nv_params_ptr->AES_Key, (u8*)get_GSM_ID_ack, encrypted_data);
-					bls_att_pushNotifyData(BleLockChar2DataHdl, encrypted_data, 16);
-				//}
-			}
-			break;
-
-			case GET_LOCK_GSM_VER_CMD:
-			{
-				printf("GET_LOCK_GSM_VER_CMD.\n");
-
-				//u32 get_token =  MAKE_U32(decrypted_data[7], decrypted_data[6], decrypted_data[5], decrypted_data[4]);
-
-				//if(g_session_id == get_token){//?
-					get_GSM_VER_ack_t* get_GSM_VER_ack = (get_GSM_VER_ack_t*)p;
-					get_GSM_VER_ack->tokenack0 = 0x05;
-					get_GSM_VER_ack->tokenack1 = 0x24;
-					get_GSM_VER_ack->tokenack2 = 0x01;
-					get_GSM_VER_ack->N = GSM_VER_LEN;
-					memcpy(get_GSM_VER_ack->ver, g_GSM_ver, GSM_VER_LEN);
-					AES_ECB_Encryption(nv_params_ptr->AES_Key, (u8*)get_GSM_VER_ack, encrypted_data);
-					bls_att_pushNotifyData(BleLockChar2DataHdl, encrypted_data, 16);
-				//}
-			}
-			break;
-
-			case GET_LOCK_DOMAINS_CMD:
-			{
-				printf("GET_LOCK_DOMAINS_CMD.\n");
-
-				//u32 get_token =  MAKE_U32(decrypted_data[7], decrypted_data[6], decrypted_data[5], decrypted_data[4]);
-
-				//if(g_session_id == get_token){//?
-				    get_lock_domains_ack_t* get_lock_domains_ack = (get_lock_domains_ack_t*)p;
-				    get_lock_domains_ack->tokenack0 = 0x05;
-				    get_lock_domains_ack->tokenack1 = 0x30;
-				    get_lock_domains_ack->T = LOCK_DOMAIN_LEN;
-				    memcpy(get_lock_domains_ack->DOMAIN, g_lock_domains, LOCK_DOMAIN_LEN);
-					AES_ECB_Encryption(nv_params_ptr->AES_Key, (u8*)get_lock_domains_ack, encrypted_data);
-					bls_att_pushNotifyData(BleLockChar2DataHdl, encrypted_data, 16);
-				//}
-			}
-			break;
-
-#if 0
-			case START_OTA_CMD:
-			{
-				//u32 get_token =  MAKE_U32(decrypted_data[7], decrypted_data[6], decrypted_data[5], decrypted_data[4]);
-
-				//if(g_session_id == get_token){//?
-
-				//}
-			}
-			break;
-#endif
-
-			default:
-			{
-				printf("not 4bytes cmd.\n");
-				cmd_len = 3;//不是4bytes cmd
-			}
-		}//the end of switch(CMD_LEN4BYTES(cmdOpCode))
-
-		if(cmd_len == 4)return 0;
-
-		/////////////////////////////////// 3字节命令解析 /////////////////////////////////////////
-		switch(CMD_LEN3BYTES(cmdOpCode))
-		{
-
-		    //static u8 chg_pwd_cmd1 = 0;
-		    static u8 chg_key_cmd1 = 0;
-
-			case GET_SYNC_TIME_CMD://get Time
-			{
-				printf("GET_SYNC_TIME_CMD.\n");
-
-				g_current_time = MAKE_U32(decrypted_data[6], decrypted_data[5], decrypted_data[4], decrypted_data[3]);
-				//u32 get_token =  MAKE_U32(decrypted_data[10], decrypted_data[9], decrypted_data[8], decrypted_data[7]);
-
-				//if(g_session_id == get_token){
-					sync_time_ack_t* sync_time_ack = (sync_time_ack_t*)p;
-					sync_time_ack->tokenack0 = 0x06;
-					sync_time_ack->tokenack1 = 0x04;
-					sync_time_ack->tokenack2 = 0x01;
-					sync_time_ack->ret = 0x00;
-				//}
-				//else{
-				//	sync_time_ack->ret = 0x01;
-				//}
-				AES_ECB_Encryption(nv_params_ptr->AES_Key, (u8*)sync_time_ack, encrypted_data);
-				bls_att_pushNotifyData(BleLockChar2DataHdl, encrypted_data, 16);
-			}
-			break;
-
-			case GET_CHRG_VOL_TEMP_CMD://Get the battery voltage and temperature
-			{
-				printf("GET_CHRG_VOL_TEMP_CMD.\n");
-
-				//u32 get_token =  MAKE_U32(decrypted_data[7], decrypted_data[6], decrypted_data[5], decrypted_data[4]);
-
-				//if(g_session_id == get_token){//?
-					get_vol_temp_ack_t* get_vol_temp_ack = (get_vol_temp_ack_t*)p;
-					get_vol_temp_ack->tokenack0 = 0x02;
-					get_vol_temp_ack->tokenack1 = 0x02;
-					get_vol_temp_ack->tokenack2 = 0x01;
-					get_vol_temp_ack->vl = 2;//电压值volt的长度,这里默认2
-					get_vol_temp_ack->volt = g_curr_vol;
-					get_vol_temp_ack->tl = 2;//温度值temp的长度,这里默认2
-					get_vol_temp_ack->temp = g_curr_temp;
-
-					AES_ECB_Encryption(nv_params_ptr->AES_Key, (u8*)get_vol_temp_ack, encrypted_data);
-					bls_att_pushNotifyData(BleLockChar2DataHdl, encrypted_data, 16);
-				//}
-			}
-			break;
-
-			case OPEN_THE_LOCK_CMD: //open the lock
-			{
-				printf("OPEN_THE_LOCK_CMD.\n");
-
-				//u32 get_token =  MAKE_U32(decrypted_data[12], decrypted_data[11], decrypted_data[10], decrypted_data[9]);
-				memcpy(g_password, decrypted_data+3, 6);
-				//if(g_session_id == get_token){//
-					open_lock_ack_t* open_lock_ack = (open_lock_ack_t*)p;
-					open_lock_ack->tokenack0 = 0x05;
-					open_lock_ack->tokenack1 = 0x02;
-					open_lock_ack->tokenack2 = 0x01;
-					open_lock_ack->RET = 0;//RET 为状态返回，00 表示开锁成功，01 表示开锁失败。
-					open_lock_ack->tl = 7;//TL为时间长度，其中年份占2个字节，其余月日时分秒各一个字节
-					open_lock_ack->rtc = GET_RTC_VAL();
-
-					AES_ECB_Encryption(nv_params_ptr->AES_Key, (u8*)open_lock_ack, encrypted_data);
-					bls_att_pushNotifyData(BleLockChar2DataHdl, encrypted_data, 16);
-				//}
-			}
-			break;
-
-			case SERIAL_NUM_LOCK_CMD:
-			{
-				printf("SERIAL_NUM_LOCK_CMD.\n");
-
-				//u32 get_token =  MAKE_U32(decrypted_data[14], decrypted_data[13], decrypted_data[12], decrypted_data[11]);
-				memcpy(g_password, decrypted_data+3, 6);
-				memcpy((u8*)&g_serial_num, decrypted_data+9, 2);
-				//if(g_session_id == get_token){//?
-					serial_number_lock_ack_t* serial_number_lock_ack = (serial_number_lock_ack_t*)p;
-					serial_number_lock_ack->tokenack0 = 0x05;
-					serial_number_lock_ack->tokenack1 = 0x32;
-					serial_number_lock_ack->tokenack2 = 0x01;
-					//TODO: 获取开锁成功or失败的信息
-					serial_number_lock_ack->RET = g_curr_lock_state;//RET 为状态返回，00 表示开锁成功，01 表示开锁失败。
-
-					AES_ECB_Encryption(nv_params_ptr->AES_Key, (u8*)serial_number_lock_ack, encrypted_data);
-					bls_att_pushNotifyData(BleLockChar2DataHdl, encrypted_data, 16);
-				//}
-			}
-			break;
-
-			case ORDER_NUM_UNLOCK_CMD:
-			{
-				printf("ORDER_NUM_UNLOCK_CMD.\n");
-
-				//u32 get_token =  MAKE_U32(decrypted_data[12], decrypted_data[11], decrypted_data[10], decrypted_data[9]);
-				memcpy(g_password, decrypted_data+3, 6);
-				//if(g_session_id == get_token){//?
-					continue_cmd_flg = 1;
-				//}
-				//else{
-				//	order_num_unlock_ack_t* order_num_unlock_ack = (order_num_unlock_ack_t*)p;
-				//	order_num_unlock_ack->tokenack0 = 0x05;
-				//	order_num_unlock_ack->tokenack1 = 0x13;
-				//	order_num_unlock_ack->tokenack2 = 0x01;
-				//	order_num_unlock_ack->RET = 1;//RET 为状态返回，00 表示开锁成功，01 表示开锁失败。
-				//	order_num_unlock_ack->tl = 7;//TL为时间长度，其中年份占2个字节，其余月日时分秒各一个字节
-				//	order_num_unlock_ack->rtc = GET_RTC_VAL();
-                //
-				//	AES_ECB_Encryption(nv_params_ptr->AES_Key, (u8*)order_num_unlock_ack, encrypted_data);
-				//	bls_att_pushNotifyData(BleLockChar2DataHdl, encrypted_data, 16);
-				//}
-			}
-			break;
-
-			case CHANGE_PASSWORD_CMD1://change password
-			{
-				printf("CHANGE_PASSWORD_CMD1.\n");
-
-				//u32 get_token =  MAKE_U32(decrypted_data[12], decrypted_data[11], decrypted_data[10], decrypted_data[9]);
-				memcpy(g_old_password, decrypted_data+3, 6);//OLDPWD 为旧密码，NEWPWD 为新密码。
-				//if(g_session_id == get_token){//?
-				//	chg_pwd_cmd1 = 1;
-				//}
-			}
-			break;
-
-			case CHANGE_PASSWORD_CMD2://change password
-			{
-				printf("CHANGE_PASSWORD_CMD2.\n");
-
-				//u32 get_token =  MAKE_U32(decrypted_data[12], decrypted_data[11], decrypted_data[10], decrypted_data[9]);
-				memcpy(g_new_password, decrypted_data+3, 6);//OLDPWD 为旧密码，NEWPWD 为新密码。
-				//if(g_session_id == get_token){//?
-				//	if(chg_pwd_cmd1 == 1){
-				//        chg_pwd_cmd1 = 0;
-						modify_pwd_ack_t* modify_pwd_ack = (modify_pwd_ack_t*)p;
-						modify_pwd_ack->tokenack0 = 0x05;
-						modify_pwd_ack->tokenack1 = 0x05;
-						modify_pwd_ack->tokenack2 = 0x01;
-						modify_pwd_ack->RET = 0x00;//RET 为状态返回，00 表示修改密码成功，01 表示修改密码失败。
-						AES_ECB_Encryption(nv_params_ptr->AES_Key, (u8*)modify_pwd_ack, encrypted_data);
-						bls_att_pushNotifyData(BleLockChar2DataHdl, encrypted_data, 16);
-				//  }
-				//}
-			}
-			break;
-
-			case MODIFY_KEY_CMD1://Modify key1
-			{
-				printf("MODIFY_KEY_CMD1.\n");
-
-				memcpy(g_new_key, decrypted_data+3, 8);//KEYL 为新密钥前 8 个字节,KEYH 为新密钥后 8 个字节，密钥字节按照小端模式排列。
-				chg_key_cmd1 = 1;
-			}
-			break;
-
-			case MODIFY_KEY_CMD2://Modify key2
-			{
-				if(chg_key_cmd1 == 1){
-
-					printf("MODIFY_KEY_CMD2.\n");
-
-					chg_key_cmd1 = 0;
-					memcpy(g_new_key+8, decrypted_data+3, 8);//KEYL 为新密钥前 8 个字节,KEYH 为新密钥后 8 个字节，密钥字节按照小端模式排列。
-
-					modify_key_ack_t* modify_key_ack = (modify_key_ack_t*)p;
-					modify_key_ack->tokenack0 = 0x07;
-					modify_key_ack->tokenack1 = 0x03;
-					modify_key_ack->tokenack2 = 0x01;
-
-					if(save_param_nv(LOCK_AES_KEY_ADR, g_new_key, 16)){
-						modify_key_ack->RET = 0x00;//RET 为状态返回，00 表示修改密钥成功，01 表示修改密钥失败;
-					}
-					else{
-						modify_key_ack->RET = 0x01;//RET 为状态返回，00 表示修改密钥成功，01 表示修改密钥失败;
-					}
-
-					AES_ECB_Encryption(nv_params_ptr->AES_Key, (u8*)modify_key_ack, encrypted_data);
-					bls_att_pushNotifyData(BleLockChar2DataHdl, encrypted_data, 16);
-
-					//update aes_key
-					if(!modify_key_ack->RET){
-						u8 lock_key[16];//data len should NOT bigger then PARAM_NV_PDU_UNIT
-						extern u8 nv_params_ptr->AES_Key[16];
-						if(load_param_from_flash(LOCK_AES_KEY_ADR, lock_key, 16)){
-							memcpy(nv_params_ptr->AES_Key, lock_key, 16);
-						}
-					}
-				}
-			}
-			break;
-
-			case SET_LOCK_WORK_PATTERN_CMD://set lock mode of operation
-			{
-				printf("SET_LOCK_WORK_PATTERN_CMD.\n");
-
-				//u32 get_token =  MAKE_U32(decrypted_data[7], decrypted_data[6], decrypted_data[5], decrypted_data[4]);
-				memcpy(&g_curr_lock_work_pattern, decrypted_data+3, 1);//MOD 为锁工作模式，00 表示正常模式，01 表示运输模式，02 表示锁重启。
-				//if(g_session_id == get_token){//?
-				    if(g_curr_lock_work_pattern == 0x02){
-				    	cpu_reboot();
-				    }
-
-					set_lock_work_pattern_ack_t* set_lock_work_pattern_ack = (set_lock_work_pattern_ack_t*)p;
-					set_lock_work_pattern_ack->tokenack0 = 0x05;
-					set_lock_work_pattern_ack->tokenack1 = 0x21;
-					set_lock_work_pattern_ack->tokenack2 = 0x01;
-
-					if(save_param_nv(SET_LOCK_WORK_MOD_ADR, &g_curr_lock_work_pattern, 1)){
-						set_lock_work_pattern_ack->RET = 0x00;//RET 为状态返回，00 表示设置成功，01 表示设置失败。
-					}
-					else{
-						set_lock_work_pattern_ack->RET = 0x01;//RET 为状态返回，00 表示设置成功，01 表示设置失败。
-					}
-
-					AES_ECB_Encryption(nv_params_ptr->AES_Key, (u8*)set_lock_work_pattern_ack, encrypted_data);
-					bls_att_pushNotifyData(BleLockChar2DataHdl, encrypted_data, 16);
-				//}
-
-			}
-			break;
-
-			default:{
-				printf("not 3byts cmd.\n");
-				cmd_len = 2;//不是3byts cmd
-			}
-		}//the end of switch(CMD_LEN3BYTES(cmdOpCode))
-
-		if(continue_cmd_flg && (cmd_len == 2))
-		{
-			switch(CMD_LEN2BYTES(cmdOpCode)){
-				case ORDER_NUM_UNLOCK_CONTINUE_CMD:
-				{
-					printf("ORDER_NUM_UNLOCK_CONTINUE_CMD.\n");
-
-					cnt++;//第一次cnt=1;
-
-					order_transmit_seq = decrypted_data[3];//CI为发送序列的序号
-
-					if(cnt == 1){//记录第一笔2bytecmd数据中的订单号总长度信息+CI
-						order_len = decrypted_data[2];//T为订单号总长度
-						tmp_order_len = order_len;
-						memcpy(order, decrypted_data+4, (order_len > 12) ? 12 : order_len);
-						(order_len > 12) ? (order_len -= 12) : (continue_cmd_flg = 0, cnt = 0);
-					}
-					else{
-						memcpy(order+12*(cnt-1), decrypted_data+4, (order_len > 12) ? 12 : order_len);
-						(order_len > 12) ? (order_len -= 12) : (continue_cmd_flg = 0, cnt = 0);
-					}
-
-					if(!continue_cmd_flg){
-
-						order_num_unlock_ack_t* order_num_unlock_ack = (order_num_unlock_ack_t*)p;
-						order_num_unlock_ack->tokenack0 = 0x05;
-						order_num_unlock_ack->tokenack1 = 0x13;
-						order_num_unlock_ack->tokenack2 = 0x01;
-						order_num_unlock_ack->RET = 0;//RET 为状态返回，00 表示开锁成功，01 表示开锁失败。
-						order_num_unlock_ack->tl = 7;//TL为时间长度，其中年份占2个字节，其余月日时分秒各一个字节
-						order_num_unlock_ack->rtc = GET_RTC_VAL();
-
-						AES_ECB_Encryption(nv_params_ptr->AES_Key, (u8*)order_num_unlock_ack, encrypted_data);
-						bls_att_pushNotifyData(BleLockChar2DataHdl, encrypted_data, 16);
-
-						g_is_order_num_unlock = 1;//订单号开锁成功。
-					}
 				}
 				break;
-
-				default:{
-					printf("CMD do not understand!.\n");
-					cmd_len = 1;//CMD do not understand!
+			}
+			case SERIAL_NUM_LOCK_CMD://0x05 31
+			{
+				if(!gap_check_token_is_met(decrypted_data+11))
+				{
+					break;
 				}
+				printf("SERIAL_NUM_LOCK_CMD.\r\n");
+				if(
+					(nv_params_ptr->lock_on_pwd[0] != *((u8 *)(decrypted_data+3)))||
+					(nv_params_ptr->lock_on_pwd[1] != *((u8 *)(decrypted_data+4)))||
+					(nv_params_ptr->lock_on_pwd[2] != *((u8 *)(decrypted_data+5)))||
+					(nv_params_ptr->lock_on_pwd[3] != *((u8 *)(decrypted_data+6)))||
+					(nv_params_ptr->lock_on_pwd[4] != *((u8 *)(decrypted_data+7)))||
+					(nv_params_ptr->lock_on_pwd[5] != *((u8 *)(decrypted_data+8)))
+				  )
+				{
+					printf("LOCK on key fail.\r\n");
+					break;
+				}
+				if(device_state.lock_onoff_state == lock_onoff_state_on)
+				{
+					printf("LOCK is on state.\r\n");
+					ble_return_lock_on_result_serial_number((device_state.lock_onoff_state == lock_onoff_state_on)?0:1);
+				}
+				else
+				{
+					printf("LOCK is open....\r\n");
+					g_serial_num = (((*((u8*)(decrypted_data+9)))&0x00FF)|
+									((*((u8*)(decrypted_data+10)))&0x00FF)<<8
+								   );
+					Flag.is_turnon_lock_serial_number_via_ble = 1;
+				}
+				break;
+			}
+			case ORDER_NUM_UNLOCK_CMD://0x05 11
+			{
+				if(!gap_check_token_is_met(decrypted_data+9))
+				{
+					break;
+				}
+				printf("ORDER_NUM_UNLOCK_CMD.\r\n");
+				if(
+					(nv_params_ptr->lock_on_pwd[0] != *((u8 *)(decrypted_data+3)))||
+					(nv_params_ptr->lock_on_pwd[1] != *((u8 *)(decrypted_data+4)))||
+					(nv_params_ptr->lock_on_pwd[2] != *((u8 *)(decrypted_data+5)))||
+					(nv_params_ptr->lock_on_pwd[3] != *((u8 *)(decrypted_data+6)))||
+					(nv_params_ptr->lock_on_pwd[4] != *((u8 *)(decrypted_data+7)))||
+					(nv_params_ptr->lock_on_pwd[5] != *((u8 *)(decrypted_data+8)))
+				  )
+				{
+					printf("LOCK on key fail.\r\n");
+					break;
+				}
+				order_lockon_check_fail = 0;
+				memset(g_order,0,sizeof(g_order));
+				order_current_number = 0;
+				break;
+			}
+			case ORDER_NUM_UNLOCK_RECEIVE_ORDER_CMD://0x05 12
+			{
+				g_order_number = (*((u8*)(decrypted_data+2)));
+				memcpy(&g_order[order_current_number],(decrypted_data+4),12);
+				order_current_number += 12;
+				if(order_current_number >= g_order_number)
+				{
+					Flag.is_turnon_lock_order_via_ble = 1;
+				}
+				g_order[order_current_number] = 0;
+				printf("LOCK on order:%s.\r\n",g_order);
+				break;
+			}
+			default:
+			{
+				break;
 			}
 		}
-#endif
 	}//the end of if(len == 16)
 	else
 	{

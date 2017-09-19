@@ -71,11 +71,15 @@ extern void battery_power_check(void);
 extern void Lock_gpio_interrupt_init(void);
 extern u8 Lock_turnon_operation(void);
 extern void ble_return_lock_on_result(u8 result);
+extern void ble_return_lock_on_result_serial_number(u8 result);
+extern void ble_return_lock_on_result_order(u8 result);
 extern nv_params_storage(nv_params_t *nv_params_ptr);
 extern void buzzer_schedule_handler(void);
 extern void buzzer_turnon_lock_indicate(void);
 extern nv_params_t *ble_update_nv_params_ptr_inquiry(void);
 extern void ble_return_lockon_password_update_result(u8 result);
+extern void ble_return_lock_off_result_order(u8 result);
+extern void ble_return_lock_off_result(u8 result);
 /**************************************************************************/
 /////////////////////////////// HemiaoLock concerned ///////////////////////////////////////////
 u32 g_current_time;
@@ -88,7 +92,6 @@ u8  g_lock_ICCID[LOCK_ICCID_LEN] = {LOCK_ICCID};
 u8  g_lock_IMEI[LOCK_IMEI_LEN] = {LOCK_IMEI};
 u8  g_lock_SN[LOCK_SN_LEN] = {LOCK_SN};
 u8  g_lock_domains[LOCK_DOMAIN_LEN] = {LOCK_DOMAIN};
-u8  g_is_order_num_unlock;//是否是订单号开锁，如果是，手动关锁，锁会自动发送订单号关锁指令给手机
 u8  g_curr_lock_work_pattern = 0x00;
 u16 g_curr_vol;
 s16 g_curr_temp;
@@ -98,6 +101,8 @@ u8  g_old_password[6];
 u8  g_new_password[6];
 u8  g_new_key[16];
 u16 g_serial_num;//NO
+u8  g_order[108];
+u8  g_order_number;
 
 BJ_Time_t get_RTC_value(void);
 
@@ -729,6 +734,38 @@ void main_loop()
         if(!lock_on_result)
         	buzzer_turnon_lock_indicate();
     }
+    if(Flag.is_turnon_lock_serial_number_via_ble)
+	{
+		Flag.is_turnon_lock_serial_number_via_ble = 0;
+		lock_on_result = Lock_turnon_operation();
+		ble_return_lock_on_result_serial_number(lock_on_result);
+		if(!lock_on_result)
+			buzzer_turnon_lock_indicate();
+	}
+    if(Flag.is_turnon_lock_order_via_ble)
+	{
+		Flag.is_turnon_lock_order_via_ble = 0;
+		lock_on_result = Lock_turnon_operation();
+		ble_return_lock_on_result_order(lock_on_result);
+		if(!lock_on_result)
+		{
+			Flag.is_lockon_by_order = 1;
+			buzzer_turnon_lock_indicate();
+		}
+	}
+    if(Flag.is_lockoff_occur)
+	{
+		Flag.is_lockoff_occur = 0;
+		if(Flag.is_lockon_by_order)
+		{
+			Flag.is_lockon_by_order = 0;
+			ble_return_lock_off_result_order((device_state.lock_onoff_state == lock_onoff_state_off)?0:1);
+		}
+		else
+		{
+			ble_return_lock_off_result((device_state.lock_onoff_state == lock_onoff_state_off)?0:1);
+		}
+	}
     if(Flag.is_lockon_password_update)
     {
     	Flag.is_lockon_password_update = 0;
@@ -737,6 +774,15 @@ void main_loop()
     		ble_return_lockon_password_update_result(0);
     	else
     		ble_return_lockon_password_update_result(1);
+    }
+    if(Flag.is_aes_password_update)
+    {
+    	Flag.is_aes_password_update = 0;
+    	err_code = user_update_nv_params(ble_update_nv_params_ptr_inquiry());
+		if(err_code == 0)
+			ble_return_aes_password_update_result(0);
+		else
+			ble_return_aes_password_update_result(1);
     }
 }
 

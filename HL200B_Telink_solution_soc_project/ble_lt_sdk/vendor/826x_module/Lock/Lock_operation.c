@@ -189,6 +189,7 @@ void lock_onoff_state_polling(void)
 			if(device_state.lock_onoff_state == lock_onoff_state_on)
 			{
 				Lock_turnoff_operation();
+				Flag.is_lockoff_occur = 1;
 				printf("Lock is switch off!\r\n");
 			}
 			device_state.lock_onoff_state = lock_onoff_state_off;
